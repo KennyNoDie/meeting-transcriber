@@ -204,7 +204,7 @@ def discover_records(date_filter: str | None = None) -> list[dict[str, Any]]:
 
 
 _INLINE_ECHO_RE = re.compile(
-    r"(?:大家都在玩\s*)?发现\s*Feeds\s*游廊\s*主题精选.*?(?:FluidAudio|WhisperKit|Qwen3-ASR|Claude|Codex|V470)\s*",
+    r"(?:(?:大家都在玩\s*)?发现\s*Feeds\s*游廊\s*主题精选.*?|Kenny\s*小光\s*Codex\s*Claude\s*)Qwen3-ASR\s*WhisperKit\s*FluidAudio[。.\s]*",
     re.IGNORECASE,
 )
 
@@ -215,6 +215,8 @@ def is_prompt_echo_line(line: str) -> bool:
     if re.match(r"^\[[^\]]+\]\s*(?:\[[^\]]+\]|[^:]+):\s*$", cleaned):
         return True
     if re.search(r":\s*大家都在玩[。.\s]*$", line.strip()):
+        return True
+    if "Qwen3-ASR" in line and "WhisperKit" in line and "FluidAudio" in line and len(cleaned) < 25:
         return True
     if ("发现" in line and "游廊" in line and "主题精选" in line) and len(cleaned) < 25:
         return True

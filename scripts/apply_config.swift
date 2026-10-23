@@ -21,12 +21,8 @@ let fm = FileManager.default
 try? fm.createDirectory(at: protocolsOutDir, withIntermediateDirectories: true)
 try? fm.createDirectory(at: recordingsOutDir, withIntermediateDirectories: true)
 
-let vocabFile = fm.fileExists(atPath: configDir.appendingPathComponent("vocabulary.txt").path)
-    ? configDir.appendingPathComponent("vocabulary.txt")
-    : configDir.appendingPathComponent("vocabulary.example.txt")
-let rulesFile = fm.fileExists(atPath: configDir.appendingPathComponent("terminology_rules.txt").path)
-    ? configDir.appendingPathComponent("terminology_rules.txt")
-    : configDir.appendingPathComponent("terminology_rules.example.txt")
+let vocabFile = configDir.appendingPathComponent("vocabulary.txt")
+let rulesFile = configDir.appendingPathComponent("terminology_rules.txt")
 let promptFile = promptsDir.appendingPathComponent("protocol_prompt.md")
 
 func makeSecurityBookmark(for url: URL) -> Data? {
@@ -44,7 +40,7 @@ func makeSecurityBookmark(for url: URL) -> Data? {
     )
 }
 
-// 1. 后台静默监听配置（覆盖主流会议 + 微信/企微独立会议子包 wwmapp/腾讯会议麦克风激活检测）
+// 1. 后台静默监听配置（覆盖主流会议 + 微信/企微/腾讯会议麦克风激活检测）
 defaults.set(true, forKey: "autoWatch")
 defaults.set(true, forKey: "watchTeams")
 defaults.set(true, forKey: "watchZoom")
@@ -53,14 +49,13 @@ defaults.set(true, forKey: "watchBrowserMeetings")
 defaults.set(true, forKey: "watchWeChat")
 defaults.set(true, forKey: "watchTencentMeeting")
 defaults.set(true, forKey: "watchFaceTime")
-defaults.set(["com.tencent.WeWorkMac", "com.tencent.wwmapp", "com.tencent.meeting", "com.tencent.wemeet"], forKey: "watchCustomApps")
+defaults.set(["com.tencent.wwmapp", "com.tencent.meeting", "com.tencent.wemeet"], forKey: "watchCustomApps")
 
-defaults.set(3.0, forKey: "pollInterval")
+defaults.set(1.0, forKey: "pollInterval")
 defaults.set(15.0, forKey: "endGrace")
 defaults.set(false, forKey: "noMic")
 defaults.set(false, forKey: "recordOnly")
-let micSpeaker = ProcessInfo.processInfo.environment["MT_MIC_SPEAKER"] ?? "Me"
-defaults.set(micSpeaker, forKey: "micName")
+defaults.set("Kenny", forKey: "micName")
 
 // 2. 转写、VAD 静音剔除与声纹分离配置（默认使用本地 MLX Qwen3-ASR 1.7B + 中文 zh）
 defaults.set("qwen3ASR", forKey: "transcriptionEngine")
@@ -85,7 +80,7 @@ if let rulesText = try? String(contentsOf: rulesFile, encoding: .utf8) {
     defaults.set(rulesText, forKey: "terminologyRulesText")
 }
 
-// 4. 输出与协议生成配置（默认 none 仅静默落盘带时间戳与声纹的 .txt 逐字稿，零报错弹窗）
+// 4. 输出与协议生成配置（默认 none 仅静默落盘带时间戳与声纹的 .txt 逐字稿，零报错弹窗；传参 openAICompatible 可开启单场实时摘要）
 let providerArg = CommandLine.arguments.dropFirst().first ?? "none"
 defaults.set(providerArg, forKey: "protocolProvider")
 defaults.set("Chinese", forKey: "protocolLanguage")
@@ -108,10 +103,15 @@ if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMa
         try? fm.removeItem(at: targetPromptURL)
     }
     try? fm.createSymbolicLink(at: targetPromptURL, withDestinationURL: promptFile)
+    print("Linked custom prompt: \(targetPromptURL.path) -> \(promptFile.path)")
 }
 
 print("Successfully applied MeetingTranscriber configuration:")
-print("  - Workspace Root: \(projectRoot.path)")
-print("  - Engine: qwen3ASR (Qwen/Qwen3-ASR-1.7B MLX)")
-print("  - Auto Watch: Teams, Zoom, Webex, Browser, WeChat, TencentMeeting, WeCom (wwmapp)")
-print("  - Output Folder: \(outputsRootDir.path)")
+print("  - Bundle ID: \(bundleID)")
+print("  - Auto Watch: true (Teams, Zoom, Webex, Browser, WeChat, TencentMeeting, WeCom)")
+print("  - Whisper Language: zh (Fixed from default 'de')")
+print("  - Protocol Language: Chinese (Fixed from default 'German')")
+print("  - Mic Speaker Label: Kenny")
+print("  - VAD & Dual-Track Diarization: Enabled")
+print("  - Output Folder: \(protocolsOutDir.path)")
+print("  - Local RPC API: Enabled (http://127.0.0.1:9876)")
