@@ -278,9 +278,11 @@ final class WatchingController {
     /// - Parameter userInitiated: see `toggleWatching`.
     private func requestStartPermissions(userInitiated: Bool) async {
         _ = await ensureMicAccess()
-        requestScreenRecording()
-        if userInitiated, settings.watchTeams {
-            requestAccessibility()
+        if userInitiated {
+            requestScreenRecording()
+            if settings.watchTeams {
+                requestAccessibility()
+            }
         }
     }
 

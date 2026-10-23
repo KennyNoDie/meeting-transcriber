@@ -10,6 +10,7 @@ extension Notification.Name {
     static let showSettings = Notification.Name("showSettings")
     static let showTimeline = Notification.Name("showTimeline")
     static let closeSettings = Notification.Name("closeSettings")
+    static let refreshPermissions = Notification.Name("refreshPermissions")
 }
 
 /// Renders the menu-bar icon and ticks the animation frame in its own
@@ -211,6 +212,11 @@ struct MeetingTranscriberApp: App {
         }
         .onReceive(NotificationCenter.default.publisher(for: .closeSettings)) { _ in
             closeWindow(id: "settings")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshPermissions)) { _ in
+            Task { @MainActor in
+                await appState.permissions.check()
+            }
         }
         .task {
             await appState.engines.preloadActiveModel()

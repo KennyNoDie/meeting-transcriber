@@ -115,18 +115,22 @@ struct AdvancedSettingsView: View {
         }
         .formStyle(.grouped)
         .onAppear { refreshPermissions() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissions()
+        }
     }
 
     #if APPSTORE
-        private static let screenRecordingDetail = "Required for app audio capture"
+        private static let screenRecordingDetail = "用于捕获会议应用内系统音频"
     #else
-        private static let screenRecordingDetail = "Required for meeting detection and app audio capture"
+        private static let screenRecordingDetail = "用于会议自动检测与应用内系统音频捕获"
     #endif
 
     private func refreshPermissions() {
         micPermission = AVCaptureDevice.authorizationStatus(for: .audio)
         screenRecordingOK = Permissions.checkScreenRecording()
         accessibilityOK = AXIsProcessTrusted()
+        NotificationCenter.default.post(name: .refreshPermissions, object: nil)
     }
 
     private func exportDiagnostics() {

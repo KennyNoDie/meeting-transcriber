@@ -408,6 +408,15 @@ struct TimelineSettingsView: View {
                     .onChange(of: selectedDate) { _, _ in
                         scrollProxy.scrollTo("TIMELINE_TOP", anchor: .top)
                     }
+                    .onChange(of: pipelineBusy) { _, _ in
+                        reloadTimeline()
+                    }
+                    .onChange(of: transcriberStatus?.state) { _, _ in
+                        reloadTimeline()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                        reloadTimeline()
+                    }
                 }
             }
             .ignoresSafeArea(.container, edges: .top)

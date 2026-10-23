@@ -58,11 +58,7 @@ final class PermissionsController {
 
         let problems = result.problems
         if !problems.isEmpty, problems != previousProblems {
-            PermissionHealthCheck.debugLog("[PermissionHealthCheck] Sending notification: \(result.notificationBody)")
-            notifier.notify(
-                title: "Permission Problem",
-                body: result.notificationBody,
-            )
+            PermissionHealthCheck.debugLog("[PermissionHealthCheck] Detected problems (notification suppressed): \(result.notificationBody)")
         }
     }
 
