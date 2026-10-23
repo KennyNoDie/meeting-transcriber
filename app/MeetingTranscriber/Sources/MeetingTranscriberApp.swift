@@ -81,17 +81,50 @@ private struct WindowAccessor: NSViewRepresentable {
     }
 }
 
-/// Intercepts left-clicks on the app's menu bar status item (`NSStatusBarWindow`)
-/// so clicking the top menu bar icon directly opens and brings the main Timeline UI
-/// window (`id: "settings"`) to the front instead of showing a dropdown menu.
+/// Intercepts clicks on the app's menu bar status item (`NSStatusBarWindow` /
+/// `NSStatusBarButton` / `NSMenuBarNavigateAction`) across macOS 14–26 so
+/// clicking the top menu bar icon always opens and brings the main Timeline UI
+/// window (`id: "settings"`) to the front, whether recording or idle.
 @MainActor
-private final class StatusBarDirectOpenMonitor {
+private final class StatusBarDirectOpenMonitor: NSObject {
     static let shared = StatusBarDirectOpenMonitor()
     private var localMonitor: Any?
+    private var observersInstalled = false
+    private var isOpeningMainWindow = false
+    var openSettingsWindowAction: (() -> Void)?
 
     func installIfNeeded() {
+        if !observersInstalled {
+            observersInstalled = true
+            let nc = NotificationCenter.default
+            nc.addObserver(
+                self,
+                selector: #selector(handleAppDidFinishLaunching(_:)),
+                name: NSApplication.didFinishLaunchingNotification,
+                object: nil,
+            )
+            nc.addObserver(
+                self,
+                selector: #selector(handleWindowDidBecomeKey(_:)),
+                name: NSWindow.didBecomeKeyNotification,
+                object: nil,
+            )
+            nc.addObserver(
+                self,
+                selector: #selector(handleWindowOcclusionChanged(_:)),
+                name: NSWindow.didChangeOcclusionStateNotification,
+                object: nil,
+            )
+            nc.addObserver(
+                self,
+                selector: #selector(handleWindowDidUpdate(_:)),
+                name: NSWindow.didUpdateNotification,
+                object: nil,
+            )
+        }
+
         guard localMonitor == nil else { return }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { event in
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
             guard let window = event.window else { return event }
             let className = String(describing: type(of: window))
             guard className.contains("StatusBar") else { return event }
@@ -100,11 +133,118 @@ private final class StatusBarDirectOpenMonitor {
             }
             if event.type == .leftMouseDown {
                 DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: .showSettings, object: nil)
-                    NotificationCenter.default.post(name: .showTimeline, object: nil)
+                    self?.openMainWindow()
                 }
             }
             return nil
+        }
+    }
+
+    @objc private func handleAppDidFinishLaunching(_: Notification) {
+        hookStatusBarButtonsIfNeeded()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.hookStatusBarButtonsIfNeeded()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.hookStatusBarButtonsIfNeeded()
+        }
+    }
+
+    @objc private func handleWindowDidUpdate(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        let cls = String(describing: type(of: window))
+        if cls.contains("StatusBar") {
+            hookStatusBarButton(in: window)
+        }
+    }
+
+    @objc private func handleWindowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        interceptMenuBarExtraWindowIfNeeded(window)
+    }
+
+    @objc private func handleWindowOcclusionChanged(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window.isVisible else { return }
+        interceptMenuBarExtraWindowIfNeeded(window)
+    }
+
+    private func interceptMenuBarExtraWindowIfNeeded(_ window: NSWindow) {
+        guard !isOpeningMainWindow else { return }
+        let cls = String(describing: type(of: window))
+        guard cls.contains("MenuBarExtra") || cls.contains("Popover") else { return }
+        window.orderOut(nil)
+        openMainWindow()
+    }
+
+    func hookStatusBarButtonsIfNeeded() {
+        guard let app = NSApp else { return }
+        for window in app.windows {
+            let cls = String(describing: type(of: window))
+            if cls.contains("StatusBar") {
+                hookStatusBarButton(in: window)
+            }
+        }
+    }
+
+    private func hookStatusBarButton(in window: NSWindow) {
+        let rootView = window.contentView?.superview ?? window.contentView
+        guard let rootView else { return }
+        for button in Self.findStatusBarButtons(in: rootView) {
+            if button.target !== self || button.action != #selector(handleStatusBarButtonClick(_:)) {
+                button.target = self
+                button.action = #selector(handleStatusBarButtonClick(_:))
+                button.sendAction(on: [.leftMouseUp])
+            }
+        }
+    }
+
+    private static func findStatusBarButtons(in view: NSView) -> [NSStatusBarButton] {
+        var result: [NSStatusBarButton] = []
+        if let button = view as? NSStatusBarButton {
+            result.append(button)
+        }
+        for subview in view.subviews {
+            result.append(contentsOf: findStatusBarButtons(in: subview))
+        }
+        return result
+    }
+
+    @objc private func handleStatusBarButtonClick(_: Any?) {
+        openMainWindow()
+    }
+
+    func openMainWindow() {
+        guard !isOpeningMainWindow else { return }
+        isOpeningMainWindow = true
+        defer { isOpeningMainWindow = false }
+
+        if let app = NSApp {
+            for window in app.windows {
+                let cls = String(describing: type(of: window))
+                if cls.contains("MenuBarExtra") || cls.contains("Popover") {
+                    window.orderOut(nil)
+                }
+            }
+        }
+        openSettingsWindowAction?()
+        NotificationCenter.default.post(name: .showSettings, object: nil)
+        NotificationCenter.default.post(name: .showTimeline, object: nil)
+        activateAndOrderFrontSettingsWindow()
+        DispatchQueue.main.async { [weak self] in
+            self?.activateAndOrderFrontSettingsWindow()
+        }
+    }
+
+    func activateAndOrderFrontSettingsWindow() {
+        guard let app = NSApp else { return }
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
+        app.activate()
+        for window in app.windows where window.identifier?.rawValue == "settings" {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
         }
     }
 }
@@ -174,15 +314,11 @@ struct MeetingTranscriberApp: App {
         Color.clear
             .frame(width: 1, height: 1)
             .onAppear {
+                StatusBarDirectOpenMonitor.shared.openSettingsWindowAction = { [openWindow] in
+                    openWindow(id: "settings")
+                }
                 DispatchQueue.main.async {
-                    for window in NSApp.windows {
-                        let cls = String(describing: type(of: window))
-                        if cls.contains("MenuBarExtra") || cls.contains("Popover") {
-                            window.orderOut(nil)
-                        }
-                    }
-                    bringWindowToFront(id: "settings")
-                    NotificationCenter.default.post(name: .showTimeline, object: nil)
+                    StatusBarDirectOpenMonitor.shared.openMainWindow()
                 }
             }
     }
@@ -219,6 +355,10 @@ struct MeetingTranscriberApp: App {
             }
         }
         .task {
+            StatusBarDirectOpenMonitor.shared.openSettingsWindowAction = { [openWindow] in
+                openWindow(id: "settings")
+            }
+            StatusBarDirectOpenMonitor.shared.hookStatusBarButtonsIfNeeded()
             await appState.engines.preloadActiveModel()
         }
         .task {
@@ -319,6 +459,7 @@ struct MeetingTranscriberApp: App {
             )
             .background(
                 WindowAccessor { window in
+                    window.isReleasedWhenClosed = false
                     window.titleVisibility = .hidden
                     window.titlebarAppearsTransparent = true
                     window.styleMask.insert(.fullSizeContentView)
@@ -436,19 +577,33 @@ struct MeetingTranscriberApp: App {
     }
 
     private func bringWindowToFront(id: String) {
+        StatusBarDirectOpenMonitor.shared.openSettingsWindowAction = { [openWindow] in
+            openWindow(id: "settings")
+        }
         openWindow(id: id)
-        NSApp.activate(ignoringOtherApps: true)
-        // Ensure the window is brought to front even if already open
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
+        NSApp.activate()
+        // Ensure the window is brought to front even if already open or previously closed
         DispatchQueue.main.async {
+            NSRunningApplication.current.activate(options: [.activateAllWindows])
+            NSApp.activate()
             for window in NSApp.windows where window.identifier?.rawValue == id {
+                if window.isMiniaturized {
+                    window.deminiaturize(nil)
+                }
                 window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
             }
         }
     }
 
     private func closeWindow(id: String) {
         for window in NSApp.windows where window.identifier?.rawValue == id {
-            window.close()
+            if id == "settings" {
+                window.orderOut(nil)
+            } else {
+                window.close()
+            }
         }
     }
 
