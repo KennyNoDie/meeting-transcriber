@@ -23,7 +23,7 @@ python3 "$CLI" status
 
 | 用户诉求 | 执行步骤 | 必读参考与提示词合同 |
 | :--- | :--- | :--- |
-| **每日时间线复盘 / 今天聊了什么** | `status` → `build-timeline --date YYYY-MM-DD` → 读取汇总稿并按每日复盘模板提炼 | [工作流与提示词 §1 每日时间线复盘](references/workflows-and-prompts.md) |
+| **每日时间线复盘 / 今天聊了什么** | `status` → `summarize --date YYYY-MM-DD`（后台调 `agy` Gemini 4 High 生成 `<date>_ai_digest.json/.md` 并同步刷新 App 时间线 UI）或 `build-timeline --date YYYY-MM-DD` | [工作流与提示词 §1 每日时间线复盘](references/workflows-and-prompts.md) |
 | **查找某次讨论、原话或拍板结论** | `search "<关键词>" [--date] [--speaker]` → `read <slug> [--start --end]` → 附时间戳与原话回答 | [工作流与提示词 §2 查找讨论与拍板](references/workflows-and-prompts.md) |
 | **整理单场/多场项目简报或交接单** | `list --date` → `read <slug>` → 按「决策 / 原因 / 承诺 / 依赖 / 未决问题」五栏输出 | [工作流与提示词 §3 项目简报与交接](references/workflows-and-prompts.md) |
 | **提取待办与跟进项（Follow-ups）** | 读取目标文稿 → 严格拆分为「原话明确承诺」与「Agent 建议跟进」两栏 | [工作流与提示词 §4 待办与跟进提取](references/workflows-and-prompts.md) |

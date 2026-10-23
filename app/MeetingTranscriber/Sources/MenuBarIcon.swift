@@ -148,11 +148,11 @@ enum MenuBarIcon {
         return frames[animationFrame % frames.count]
     }
 
-    /// Simplified 4-state crisp menu bar image (zero choppy frame animation):
-    /// 1. 没录（Idle）: static monochrome template waveform (18x18).
-    /// 2. 在录（Recording - Normal）: static waveform + crisp green live dot in bottom-right (18x18).
+    /// Simplified 4-state crisp 18x18 menu bar image (fixed compact width, zero choppy animation):
+    /// 1. 没录（Idle）: low-amplitude calm monochrome template waveform (18x18).
+    /// 2. 在录（Recording - Normal）: vibrant green full-amplitude active call waveform + green live dot (18x18).
     /// 3. 在录但没声音 / 权限异常（Silent / Fault）: full red waveform + red exclamation mark (18x18).
-    /// 4. 转录状态（Transcribing / Diarizing / Processing）: static waveform + blue dot + crisp "转录中" text (54x18).
+    /// 4. 转录状态（Transcribing / Diarizing / Processing）: blue horizontal text lines + blue dot (18x18).
     static func statusBarImage(
         badge: BadgeKind,
         permissionOverlay: Bool = false,
@@ -163,13 +163,13 @@ enum MenuBarIcon {
         let isSilentOrError = permissionOverlay || micSilentOverlay || appSilentOverlay || badge == .error
         let isTranscribingState = badge == .transcribing || badge == .diarizing || badge == .processing
         let isRecordingNormal = badge == .recording && !isSilentOrError
+        let iconSize = NSSize(width: 18, height: 18)
 
-        // State 1: 没录 (Idle / Done) -> Clean static 18x18 template waveform
+        // State 1: 没录 (Idle / Done) -> Calm low-amplitude 18x18 template waveform
         if !isSilentOrError, !isTranscribingState, !isRecordingNormal, !recordOnlyOverlay {
-            let iconSize = NSSize(width: 18, height: 18)
             let img = NSImage(size: iconSize, flipped: false) { rect in
                 NSColor.black.setFill()
-                drawRecordingAnimation(in: rect, frame: 0)
+                drawCustomWaveform(in: rect, heights: [0.16, 0.28, 0.42, 0.26, 0.16])
                 if badge == .updateAvailable {
                     drawUpdateArrow(in: rect)
                 }
@@ -181,43 +181,24 @@ enum MenuBarIcon {
 
         let isDark = NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let fgColor = isDark ? NSColor.white : NSColor.black
-        let iconRect = NSRect(x: 0, y: 0, width: 18, height: 18)
 
-        // State 4: 转录中 -> 54x18 crisp icon + "转录中" text (zero choppy animation)
-        if isTranscribingState, !isSilentOrError {
-            let totalSize = NSSize(width: 54, height: 18)
-            let img = NSImage(size: totalSize, flipped: false) { _ in
-                fgColor.setFill()
-                drawRecordingAnimation(in: iconRect, frame: 0)
-                drawStatusDot(in: iconRect, color: NSColor.systemBlue)
-
-                let attrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-                    .foregroundColor: fgColor,
-                ]
-                let label = NSAttributedString(string: "转录中", attributes: attrs)
-                let labelSize = label.size()
-                let textPoint = NSPoint(x: 19, y: (18 - labelSize.height) / 2)
-                label.draw(at: textPoint)
-                return true
-            }
-            img.isTemplate = false
-            return img
-        }
-
-        // State 2 (在录) or State 3 (在录但没声音 / 异常) -> 18x18 non-template image
-        let img = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+        // State 2 / 3 / 4: Fixed 18x18 non-template image with distinct color & shape
+        let img = NSImage(size: iconSize, flipped: false) { rect in
             if isSilentOrError {
                 NSColor.systemRed.setFill()
-                drawRecordingAnimation(in: rect, frame: 0)
+                drawCustomWaveform(in: rect, heights: [0.35, 0.65, 0.88, 0.60, 0.35])
                 drawExclamationBadge(in: rect)
             } else if isRecordingNormal {
-                fgColor.setFill()
-                drawRecordingAnimation(in: rect, frame: 0)
+                NSColor.systemGreen.setFill()
+                drawCustomWaveform(in: rect, heights: [0.42, 0.76, 0.96, 0.72, 0.44])
                 drawStatusDot(in: rect, color: NSColor.systemGreen)
+            } else if isTranscribingState {
+                NSColor.systemBlue.setFill()
+                drawTranscribingAnimation(in: rect, frame: 5)
+                drawStatusDot(in: rect, color: NSColor.systemBlue)
             } else {
                 fgColor.setFill()
-                drawRecordingAnimation(in: rect, frame: 0)
+                drawCustomWaveform(in: rect, heights: [0.25, 0.50, 0.75, 0.45, 0.30])
                 if recordOnlyOverlay {
                     drawRecordOnlyBadge(in: rect)
                 }
@@ -226,6 +207,21 @@ enum MenuBarIcon {
         }
         img.isTemplate = false
         return img
+    }
+
+    private static func drawCustomWaveform(in rect: NSRect, heights: [CGFloat]) {
+        let layout = barsLayout(in: rect)
+        for i in 0 ..< min(barCount, heights.count) {
+            let x = layout.left + CGFloat(i) * barSpacing
+            let barH = rect.height * heights[i]
+            let barRect = NSRect(
+                x: x,
+                y: layout.centerY - barH / 2,
+                width: barWidth,
+                height: barH,
+            )
+            NSBezierPath(roundedRect: barRect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
+        }
     }
 
     private static func drawStatusDot(in rect: NSRect, color: NSColor) {

@@ -49,11 +49,11 @@ struct SettingsView: View {
         }
         .navigationTitle("设置与时间线")
         .frame(
-            minWidth: 760,
-            idealWidth: 860,
-            maxWidth: 1000,
-            minHeight: 520,
-            idealHeight: 640,
+            minWidth: 820,
+            idealWidth: 960,
+            maxWidth: 1280,
+            minHeight: 580,
+            idealHeight: 760,
             maxHeight: .infinity,
         )
     }

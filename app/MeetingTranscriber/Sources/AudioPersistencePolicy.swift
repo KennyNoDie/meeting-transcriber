@@ -45,6 +45,13 @@ enum AudioPersistencePolicy {
         }
 
         let sourceDir = key(source.deletingLastPathComponent())
+        let isRawStagingName = source.lastPathComponent.range(
+            of: #"^\d{8}_\d{6}_(mix|app|mic)\.wav$"#,
+            options: .regularExpression,
+        ) != nil
+        if sourceDir == key(stagingDir), isRawStagingName {
+            return .move
+        }
         if sourceDir == key(destinationDir) {
             return .alreadyAtDestination
         }

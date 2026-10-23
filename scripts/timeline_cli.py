@@ -37,7 +37,8 @@ APPLE_REFERENCE_EPOCH = 978307200.0  # 2001-01-01 00:00:00 UTC (Swift Date defau
 MAX_RECENT_SAMPLES = 3
 MIN_SPEAKING_TIME_FOR_CENTROID = 3.0
 
-STAMP_RE = re.compile(r"^(\d{8})_(\d{6})(?:_(.+))?$")
+STAMP_RE = re.compile(r"^(\d{8})_(\d{4,6})(?:_(.+))?$")
+HEX_SUFFIX_RE = re.compile(r"_[0-9a-fA-F]{8}$")
 AUDIO_SUFFIXES = (
     "_mix_16k",
     "_app_16k",
@@ -63,8 +64,14 @@ def parse_slug(slug: str, fallback_path: Path | None = None) -> tuple[str, str, 
     if match:
         d, t, raw_title = match.group(1), match.group(2), match.group(3) or "语音记录"
         date_str = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
-        time_str = f"{t[:2]}:{t[2:4]}:{t[4:6]}"
-        return date_str, time_str, raw_title.replace("_", " ")
+        sec_part = t[4:6] if len(t) >= 6 else "00"
+        time_str = f"{t[:2]}:{t[2:4]}:{sec_part}"
+        raw_title = HEX_SUFFIX_RE.sub("", raw_title).replace("_", " ").strip()
+        if raw_title.lower() == "wwmapp call":
+            raw_title = "企微会议"
+        elif raw_title.lower() == "tencent meeting call":
+            raw_title = "腾讯会议"
+        return date_str, time_str, raw_title or "语音记录"
 
     if fallback_path and fallback_path.exists():
         mtime = dt.datetime.fromtimestamp(fallback_path.stat().st_mtime)
@@ -168,6 +175,7 @@ def discover_records(date_filter: str | None = None) -> list[dict[str, Any]]:
         speakers = sorted(
             set(
                 re.findall(r"\]\s*\[([A-Za-z0-9_\u4e00-\u9fa5 ]+)\]", content)
+                + re.findall(r"\]\s*([A-Za-z0-9_\u4e00-\u9fa5 ]+):", content)
                 + re.findall(r"\[([A-Za-z0-9_\u4e00-\u9fa5 ]+)\]:", content)
             )
         )
@@ -178,12 +186,21 @@ def discover_records(date_filter: str | None = None) -> list[dict[str, Any]]:
             else ("mic_only" if mic_path else ("app_only" if app_path else "transcript_only"))
         )
 
+        ai_entry_digest = None
+        digest_file = DAILY_TIMELINES_DIR / f"{date_str}_ai_digest.json"
+        if digest_file.exists():
+            try:
+                digest_payload = json.loads(digest_file.read_text(encoding="utf-8"))
+                ai_entry_digest = (digest_payload.get("entries") or {}).get(slug)
+            except Exception:
+                ai_entry_digest = None
+
         records.append(
             {
                 "slug": slug,
                 "date": date_str,
                 "time": time_str,
-                "title": title,
+                "title": (ai_entry_digest or {}).get("shortTitle") or title,
                 "status": "recording_in_progress" if slug in in_progress_slugs else (
                     "transcribed" if content else "audio_only"
                 ),
@@ -191,6 +208,10 @@ def discover_records(date_filter: str | None = None) -> list[dict[str, Any]]:
                 "durationSeconds": duration,
                 "charCount": len(content),
                 "speakers": speakers,
+                "aiSummary": (ai_entry_digest or {}).get("summary"),
+                "densityLabel": (ai_entry_digest or {}).get("densityLabel"),
+                "highlightsCount": (ai_entry_digest or {}).get("highlightsCount"),
+                "tags": (ai_entry_digest or {}).get("tags"),
                 "transcriptPath": str(txt_path) if txt_path else None,
                 "qwenDerivativePath": str(qwen_by_slug[slug]) if slug in qwen_by_slug else None,
                 "primaryAudioPath": str(primary_audio) if primary_audio else None,
@@ -833,6 +854,21 @@ def cmd_build_timeline(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_summarize(args: argparse.Namespace) -> int:
+    summarizer = PROJECT_ROOT / "scripts" / "summarize_timeline_agy.py"
+    cmd = [sys.executable, str(summarizer)]
+    if args.date:
+        cmd.extend(["--date", args.date])
+    if args.slug:
+        cmd.extend(["--slug", args.slug])
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        print(json.dumps({"error": res.stderr.strip() or res.stdout.strip()}, ensure_ascii=False))
+        return res.returncode
+    print(res.stdout.strip())
+    return 0
+
+
 def cmd_retranscribe(args: argparse.Namespace) -> int:
     records = discover_records()
     audio_path: Path | None = None
@@ -923,6 +959,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_tl = sub.add_parser("build-timeline", help="Aggregate daily timeline markdown")
     p_tl.add_argument("--date", help="Date YYYY-MM-DD (default: today)")
 
+    p_sum = sub.add_parser(
+        "summarize",
+        help="Invoke agy (gemini-4-argon-high) to synthesize Auday-style daily timeline & session summaries",
+    )
+    p_sum.add_argument("--date", help="Date YYYY-MM-DD (default: today)")
+    p_sum.add_argument("--slug", help="Optional single recording slug to refresh")
+
     p_re = sub.add_parser("retranscribe", help="Re-transcribe audio with Qwen3-ASR-1.7B")
     p_re.add_argument("target", help="Recording slug or .wav file path")
     p_re.add_argument("--speaker", default="Kenny", help="Speaker tag for single-track")
@@ -961,6 +1004,7 @@ def main() -> int:
         "search": cmd_search,
         "read": cmd_read,
         "build-timeline": cmd_build_timeline,
+        "summarize": cmd_summarize,
         "retranscribe": cmd_retranscribe,
         "speakers": cmd_speakers,
         "assign-speaker": cmd_assign_speaker,

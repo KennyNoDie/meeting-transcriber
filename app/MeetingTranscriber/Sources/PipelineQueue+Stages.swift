@@ -912,6 +912,23 @@ extension PipelineQueue {
         } else {
             updateJobState(id: ctx.jobID, to: .done)
         }
+        Self.triggerBackgroundTimelineDigest(slug: ctx.slug)
+    }
+
+    private static func triggerBackgroundTimelineDigest(slug: String) {
+        let root = AppPaths.workspaceRootDir
+        let script = root.appendingPathComponent("scripts/summarize_timeline_agy.py")
+        guard FileManager.default.fileExists(atPath: script.path) else { return }
+        let venvPy = root.appendingPathComponent(".venv/bin/python")
+        let pyURL = FileManager.default.fileExists(atPath: venvPy.path)
+            ? venvPy
+            : URL(fileURLWithPath: "/usr/bin/python3")
+        Task.detached(priority: .utility) {
+            let proc = Process()
+            proc.executableURL = pyURL
+            proc.arguments = [script.path, "--slug", slug, "--timeout", "90"]
+            try? proc.run()
+        }
     }
 
     // MARK: - Protocol generation

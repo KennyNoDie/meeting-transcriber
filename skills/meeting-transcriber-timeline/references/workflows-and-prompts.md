@@ -14,11 +14,12 @@
    python3 "${AI_WORK_ROOT}/05_效率工具/meeting-transcriber/scripts/timeline_cli.py" status
    ```
    若 `watchState` 为 `"recording"`，在结论首行注明「当前仍有一场会议正在录制中，以下复盘截至 `checkedAt` 已落盘文稿」。
-2. 聚合当日时间线索引稿：
+2. 聚合当日时间线并调用 `agy`（`gemini-4-argon-high`）生成 Auday 每日回顾与时段摘要（同步刷新 App「录音 × 时间线」视图）：
    ```bash
+   python3 "${AI_WORK_ROOT}/05_效率工具/meeting-transcriber/scripts/timeline_cli.py" summarize --date YYYY-MM-DD
    python3 "${AI_WORK_ROOT}/05_效率工具/meeting-transcriber/scripts/timeline_cli.py" build-timeline --date YYYY-MM-DD
    ```
-3. 读取生成的 `outputs/daily_timelines/YYYY-MM-DD_daily_timeline.md`，按下方复盘提示词合同提炼交付。
+3. 读取生成的 `outputs/daily_timelines/YYYY-MM-DD_ai_digest.md`（或 `YYYY-MM-DD_raw_timeline.md`），按下方复盘提示词合同提炼交付。
 
 ### 提炼提示词合同（Daily Timeline Synthesizer）
 - **角色与目标**：将全天多段静默录音转写稿合并为一份**按时间轴排列、去水词、结论先行、带原话溯源的《每日会议时间线与决策账》**。

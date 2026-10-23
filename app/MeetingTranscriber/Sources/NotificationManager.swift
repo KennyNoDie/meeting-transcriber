@@ -86,6 +86,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
         scheduler.requestAuthorization()
     }
 
+    private static let silentRoutineTitles: Set<String> = [
+        "Meeting Detected",
+        "Manual Recording",
+        "Transcript Saved",
+        "Protocol Ready",
+        PreviousExitNotice.title,
+    ]
+
     func notify(title: String, body: String, urgency: NotificationUrgency) {
         let deliverable = deliverableOrLogDrop()
 
@@ -100,6 +108,13 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
         #endif
 
         guard deliverable else { return }
+
+        // Suppress routine start/done macOS system banners in production; the
+        // menu bar icon provides immediate visual feedback without interrupting
+        // the user's workflow.
+        if scheduler is SystemNotificationScheduler, Self.silentRoutineTitles.contains(title) {
+            return
+        }
 
         let id = UUID().uuidString
         scheduler.add(UNNotificationRequest(

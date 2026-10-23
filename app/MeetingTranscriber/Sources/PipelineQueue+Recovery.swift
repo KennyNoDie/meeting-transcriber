@@ -473,6 +473,8 @@ extension PipelineQueue {
                 guard !trackedPaths.contains(stdPath) else { return false }
                 guard !runningPaths.contains(stdPath) else { return false }
                 guard !processedPaths.contains(stdPath) else { return false }
+                let segmentsSidecar = recordingsDir.appendingPathComponent("\(group.stem)_segments.json")
+                guard !fm.fileExists(atPath: segmentsSidecar.path) else { return false }
                 let attrs = try? fm.attributesOfItem(atPath: mixURL.path)
                 if let created = attrs?[.creationDate] as? Date,
                    now.timeIntervalSince(created) > maxAge {
