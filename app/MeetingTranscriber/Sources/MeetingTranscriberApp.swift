@@ -311,7 +311,17 @@ struct MeetingTranscriberApp: App {
                 } : nil,
                 onQuit: quit,
             )
+            .background(
+                WindowAccessor { window in
+                    window.titleVisibility = .hidden
+                    window.titlebarAppearsTransparent = true
+                    window.styleMask.insert(.fullSizeContentView)
+                    window.isMovableByWindowBackground = true
+                    window.backgroundColor = NSColor(red: 0.965, green: 0.961, blue: 0.941, alpha: 1.0)
+                },
+            )
         }
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
     }
 

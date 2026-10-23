@@ -156,6 +156,7 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
             }
+            .padding(.leading, 64)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -190,7 +191,8 @@ struct SettingsView: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
         .background(Color(red: 0.969, green: 0.965, blue: 0.949))
     }
 

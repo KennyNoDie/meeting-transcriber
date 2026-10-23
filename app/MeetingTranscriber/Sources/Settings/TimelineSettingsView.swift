@@ -94,7 +94,12 @@ struct TimelineEntry: Identifiable {
     var nonKennySpeakers: [String] {
         speakerNames.filter { name in
             let lower = name.lowercased()
-            return lower != "kenny" && name != "册少" && name != "策少" && !name.hasPrefix("说话人_")
+            return lower != "kenny"
+                && name != "册少"
+                && name != "策少"
+                && !name.hasPrefix("说话人_")
+                && !name.hasPrefix("R_S")
+                && !name.hasPrefix("L_S")
         }
     }
 
@@ -114,13 +119,17 @@ struct TimelineEntry: Identifiable {
             return "当前关注 · 语音速记"
         }
         let lower = rawTitle.lowercased()
-        if lower.contains("wwmapp") || rawTitle.contains("企微") {
-            return "企微多人评审"
+        let baseName: String = if lower.contains("wwmapp") || rawTitle.contains("企微") {
+            "企微多人评审"
+        } else if lower.contains("tencent") || rawTitle.contains("腾讯会议") {
+            "腾讯会议"
+        } else {
+            displayTitle
         }
-        if lower.contains("tencent") || rawTitle.contains("腾讯会议") {
-            return "腾讯会议"
+        if subClips.count > 1 {
+            return "\(baseName) · \(subClips.count) 段同场会议"
         }
-        return displayTitle
+        return baseName
     }
 
     var displayTitle: String {
@@ -256,7 +265,7 @@ struct TimelineSettingsView: View {
     @State private var userNotes: [String: String] = [:]
     @State private var selectedDate: String = ""
     @State private var categoryFilter: String = "ALL"
-    @State private var sortChronological: Bool = true
+    @State private var sortChronological: Bool = false
     @State private var expandedIDs: Set<String> = []
     @State private var editingNoteID: String?
     @State private var noteDraft: String = ""
@@ -360,48 +369,62 @@ struct TimelineSettingsView: View {
         return 0
     }
 
+    private var elevatedControlSurface: Color {
+        colorScheme == .dark
+            ? Color(red: 0.14, green: 0.14, blue: 0.13)
+            : Color(red: 0.996, green: 0.992, blue: 0.980)
+    }
+
     var body: some View {
         ZStack {
             canvasBackground.ignoresSafeArea()
 
-            ScrollViewReader { scrollProxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        inAppStatusAndControlBar
-                            .id("TIMELINE_TOP")
-                        audayTopHeader
-                        dayPillStrip
-                        hourlyDensityChart
-                        if isRunningAction || statusBanner != nil {
-                            liveActivityBanner
+            VStack(spacing: 0) {
+                topWindowBar
+
+                ScrollViewReader { scrollProxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 22) {
+                            audayTopHeader
+                                .id("TIMELINE_TOP")
+                            dayPillStrip
+                            hourlyDensityChart
+                            if isRunningAction || statusBanner != nil {
+                                liveActivityBanner
+                            }
+                            dailyHeroReviewCard
+                            timeSlotStreamSection
                         }
-                        dailyHeroReviewCard
-                        timeSlotStreamSection
+                        .padding(.horizontal, 30)
+                        .padding(.top, 10)
+                        .padding(.bottom, 24)
                     }
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 20)
-                }
-                .onAppear {
-                    reloadTimeline()
-                    DispatchQueue.main.async {
+                    .onAppear {
+                        reloadTimeline()
+                        DispatchQueue.main.async {
+                            scrollProxy.scrollTo("TIMELINE_TOP", anchor: .top)
+                        }
+                    }
+                    .onChange(of: selectedDate) { _, _ in
                         scrollProxy.scrollTo("TIMELINE_TOP", anchor: .top)
                     }
                 }
-                .onChange(of: selectedDate) { _, _ in
-                    scrollProxy.scrollTo("TIMELINE_TOP", anchor: .top)
-                }
             }
+            .ignoresSafeArea(.container, edges: .top)
         }
         .onDisappear {
             audioPlayer.stop()
         }
     }
 
-    // MARK: - 0. In-UI Status & Control Strip (Replaces Menu Bar Dropdown & Sidebar)
+    // MARK: - 0. Seamless Auday Window Titlebar (Aligned with Traffic Lights)
 
-    private var inAppStatusAndControlBar: some View {
+    private var topWindowBar: some View {
         let state = transcriberStatus?.state ?? .idle
         let isRec = state == .recording
+        let unrefinedCount = unrefinedEntriesForDay.count
+        let refinedCount = refinedEntriesForDay.count
+
         let statusDotColor: Color = if isRec {
             Color(red: 0.16, green: 0.78, blue: 0.40)
         } else if pipelineBusy || state == .transcribing {
@@ -409,121 +432,50 @@ struct TimelineSettingsView: View {
         } else if isWatching {
             Color(red: 0.22, green: 0.62, blue: 0.40)
         } else {
-            secondaryInk.opacity(0.5)
+            secondaryInk.opacity(0.45)
         }
 
-        let statusText: String = if isRec {
+        let statusShortText: String = if isRec {
             if let meeting = transcriberStatus?.meeting, !meeting.title.isEmpty {
                 "正在录制 · \(meeting.title)"
             } else {
-                "正在录制音频..."
+                "正在录制"
             }
         } else if pipelineBusy || state == .transcribing {
-            "正在转写与声纹识别..."
+            "转写中..."
         } else if isWatching {
-            "自动监听中"
+            "监听中"
         } else {
-            "监听已暂停"
+            "已暂停"
         }
 
-        return HStack(spacing: 10) {
-            // Left: Live Status Capsule Menu
-            Menu {
-                if let onToggleWatching {
-                    Button {
-                        onToggleWatching()
-                    } label: {
-                        Label(
-                            isWatching ? "暂停自动监听会议" : "开启自动监听会议",
-                            systemImage: isWatching ? "pause.circle" : "play.circle",
-                        )
-                    }
+        return HStack(alignment: .center, spacing: 10) {
+            // Left: Auday 4-bar waveform emblem + serif wordmark (positioned cleanly right of traffic lights)
+            HStack(spacing: 8) {
+                HStack(alignment: .center, spacing: 2.2) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(primaryInk)
+                        .frame(width: 2.2, height: 11)
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(primaryInk)
+                        .frame(width: 2.2, height: 16)
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(primaryInk)
+                        .frame(width: 2.2, height: 8)
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(primaryInk)
+                        .frame(width: 2.2, height: 13)
                 }
-                if let onStopManualRecording {
-                    Button {
-                        onStopManualRecording()
-                    } label: {
-                        Label("停止当前手动录音", systemImage: "stop.circle.fill")
-                    }
-                } else if !isRec {
-                    if let onRecordMicrophone {
-                        Button {
-                            onRecordMicrophone()
-                        } label: {
-                            Label("开始麦克风语音速记", systemImage: "mic.circle")
-                        }
-                    }
-                    if let onRecordApp {
-                        Button {
-                            onRecordApp()
-                        } label: {
-                            Label("指定应用双轨录音...", systemImage: "record.circle")
-                        }
-                    }
-                }
-                if let onProcessFiles {
-                    Divider()
-                    Button {
-                        onProcessFiles()
-                    } label: {
-                        Label("导入音视频文件转录...", systemImage: "doc.badge.plus")
-                    }
-                }
-                if let onNameSpeakers {
-                    Button {
-                        onNameSpeakers()
-                    } label: {
-                        Label("确认待定说话人...", systemImage: "person.2.wave.2")
-                    }
-                }
-                Divider()
-                Button {
-                    NSWorkspace.shared.open(settings.effectiveOutputDir)
-                } label: {
-                    Label("打开录音与文稿目录", systemImage: "folder")
-                }
-                if let onQuit {
-                    Divider()
-                    Button(role: .destructive) {
-                        onQuit()
-                    } label: {
-                        Label("退出 MeetingTranscriber", systemImage: "power")
-                    }
-                }
-            } label: {
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(statusDotColor)
-                        .frame(width: 7.5, height: 7.5)
-                    Text(statusText)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(primaryInk.opacity(0.88))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(secondaryInk)
-                }
-                .padding(.horizontal, 11)
-                .padding(.vertical, 5.5)
-                .background(
-                    Capsule()
-                        .fill(primaryInk.opacity(0.05))
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(
-                                    isRec ? statusDotColor.opacity(0.45) : primaryInk.opacity(0.08),
-                                    lineWidth: 1,
-                                ),
-                        ),
-                )
+                Text("Auday")
+                    .font(.system(size: 16.5, weight: .semibold, design: .serif))
+                    .foregroundStyle(primaryInk)
+                    .tracking(-0.3)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+            .padding(.leading, 78)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 12)
 
-            // Right: Quick Voice Memo + In-Window More Settings
+            // Right: Tactile Elevated Ivory Pills (Auday Screenshot 1 Style)
             HStack(spacing: 8) {
                 if let onStopManualRecording {
                     Button {
@@ -531,13 +483,13 @@ struct TimelineSettingsView: View {
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "stop.fill")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.system(size: 9.5, weight: .bold))
                             Text("结束速记")
                                 .font(.system(size: 11.5, weight: .semibold))
                         }
                         .foregroundStyle(Color.white)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5.5)
+                        .padding(.horizontal, 12)
+                        .frame(height: 30)
                         .background(Capsule().fill(Color(red: 0.82, green: 0.24, blue: 0.20)))
                     }
                     .buttonStyle(.plain)
@@ -547,88 +499,212 @@ struct TimelineSettingsView: View {
                         onRecordMicrophone()
                     } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: "mic.fill")
+                            Image(systemName: "waveform")
                                 .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(warmAccent)
                             Text("速记")
                                 .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(primaryInk.opacity(0.88))
                         }
-                        .foregroundStyle(primaryInk.opacity(0.85))
                         .padding(.horizontal, 11)
-                        .padding(.vertical, 5.5)
+                        .frame(height: 30)
                         .background(
                             Capsule()
-                                .fill(primaryInk.opacity(0.05))
-                                .overlay(Capsule().strokeBorder(primaryInk.opacity(0.10), lineWidth: 1)),
+                                .fill(elevatedControlSurface)
+                                .shadow(color: Color.black.opacity(0.04), radius: 3, x: 0, y: 1)
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(primaryInk.opacity(0.09), lineWidth: 1),
+                                ),
                         )
                     }
                     .buttonStyle(.plain)
                     .fixedSize()
+                    .help("立即开启一段个人麦克风语音速记")
                 }
 
-                if let onOpenSettingsTab {
-                    Menu {
+                // Auday Signature Status Pill: [ 🎙 · 监听中 ]
+                Menu {
+                    if let onToggleWatching {
+                        Button {
+                            onToggleWatching()
+                        } label: {
+                            Label(
+                                isWatching ? "暂停自动监听会议" : "开启自动监听会议",
+                                systemImage: isWatching ? "pause.circle" : "play.circle",
+                            )
+                        }
+                    }
+                    if let onStopManualRecording {
+                        Button {
+                            onStopManualRecording()
+                        } label: {
+                            Label("停止当前手动录音", systemImage: "stop.circle.fill")
+                        }
+                    } else if !isRec {
+                        if let onRecordMicrophone {
+                            Button {
+                                onRecordMicrophone()
+                            } label: {
+                                Label("开始麦克风语音速记", systemImage: "mic.circle")
+                            }
+                        }
+                        if let onRecordApp {
+                            Button {
+                                onRecordApp()
+                            } label: {
+                                Label("指定应用双轨录音...", systemImage: "record.circle")
+                            }
+                        }
+                    }
+                    if let onProcessFiles {
+                        Divider()
+                        Button {
+                            onProcessFiles()
+                        } label: {
+                            Label("导入音视频文件转录...", systemImage: "doc.badge.plus")
+                        }
+                    }
+                    if let onNameSpeakers {
+                        Button {
+                            onNameSpeakers()
+                        } label: {
+                            Label("确认待定说话人...", systemImage: "person.2.wave.2")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isRec ? "waveform" : "mic.fill")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(isRec ? statusDotColor : primaryInk.opacity(0.78))
+                        Circle()
+                            .fill(statusDotColor)
+                            .frame(width: 6, height: 6)
+                        Text(statusShortText)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(primaryInk.opacity(0.88))
+                            .lineLimit(1)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+                .background(
+                    Capsule()
+                        .fill(elevatedControlSurface)
+                        .shadow(color: Color.black.opacity(0.04), radius: 3, x: 0, y: 1)
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(
+                                    isRec ? statusDotColor.opacity(0.45) : primaryInk.opacity(0.09),
+                                    lineWidth: 1,
+                                ),
+                        ),
+                )
+                .fixedSize()
+
+                // Auday Signature Unified [ ⋯ ] Circle Menu (Settings + Timeline Actions)
+                Menu {
+                    if unrefinedCount > 0 {
+                        Button {
+                            runAgyTimelineSummarizer(newOnly: true)
+                        } label: {
+                            Label("提炼未处理的 \(unrefinedCount) 段新记录", systemImage: "sparkles")
+                        }
+                    }
+                    if !dateFilteredEntries.isEmpty {
+                        Button {
+                            runAgyTimelineSummarizer(forceAll: true)
+                        } label: {
+                            Label("重新提炼今日全部 (\(refinedCount + unrefinedCount) 段)", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    Button {
+                        runDailyTimelineBuilder()
+                    } label: {
+                        Label("导出 Markdown 时间线汇总", systemImage: "doc.richtext")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(settings.effectiveOutputDir)
+                    } label: {
+                        Label("打开录音与文稿目录", systemImage: "folder")
+                    }
+
+                    if let onOpenSettingsTab {
+                        Divider()
                         Button {
                             onOpenSettingsTab("general")
                         } label: {
-                            Label("常规与自动监听设置", systemImage: "gear")
+                            Label("常规与自动监听设置...", systemImage: "gear")
                         }
                         Button {
                             onOpenSettingsTab("audio")
                         } label: {
-                            Label("音频与麦克风设置", systemImage: "mic")
+                            Label("音频与麦克风设置...", systemImage: "mic")
                         }
                         Button {
                             onOpenSettingsTab("transcription")
                         } label: {
-                            Label("语音识别引擎与热词 (ASR)", systemImage: "waveform")
+                            Label("语音识别引擎与热词 (ASR)...", systemImage: "waveform")
                         }
                         Button {
                             onOpenSettingsTab("speakers")
                         } label: {
-                            Label("说话人声纹库管理", systemImage: "person.2")
+                            Label("说话人声纹库管理...", systemImage: "person.2")
                         }
                         Button {
                             onOpenSettingsTab("output")
                         } label: {
-                            Label("输出目录与提示词", systemImage: "doc.text")
+                            Label("输出目录与提示词...", systemImage: "doc.text")
                         }
                         Button {
                             onOpenSettingsTab("advanced")
                         } label: {
-                            Label("权限健康与系统诊断", systemImage: "wrench.and.screwdriver")
+                            Label("权限健康与系统诊断...", systemImage: "wrench.and.screwdriver")
                         }
                         Button {
                             onOpenSettingsTab("about")
                         } label: {
-                            Label("关于与版本信息", systemImage: "info.circle")
+                            Label("关于与版本信息...", systemImage: "info.circle")
                         }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("更多设置")
-                                .font(.system(size: 11.5, weight: .medium))
-                        }
-                        .foregroundStyle(primaryInk.opacity(0.85))
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5.5)
-                        .background(
-                            Capsule()
-                                .fill(primaryInk.opacity(0.05))
-                                .overlay(Capsule().strokeBorder(primaryInk.opacity(0.10), lineWidth: 1)),
-                        )
-                    } primaryAction: {
-                        onOpenSettingsTab("general")
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
+
+                    if let onQuit {
+                        Divider()
+                        Button(role: .destructive) {
+                            onQuit()
+                        } label: {
+                            Label("退出 MeetingTranscriber", systemImage: "power")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(primaryInk.opacity(0.88))
+                        .frame(width: 30, height: 30)
                 }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 30, height: 30)
+                .background(
+                    Circle()
+                        .fill(elevatedControlSurface)
+                        .shadow(color: Color.black.opacity(0.04), radius: 3, x: 0, y: 1)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(primaryInk.opacity(0.09), lineWidth: 1),
+                        ),
+                )
             }
+            .fixedSize()
         }
+        .padding(.trailing, 30)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
     }
 
-    // MARK: - 1. Top Editorial Header (Auday Screenshot 1 & 3 Layout — Narrow-Safe)
+    // MARK: - 1. Top Editorial Date Header (Auday Screenshot 1 & 3 Layout)
 
     private var audayTopHeader: some View {
         let parts = Self.parseDateDisplay(activeDate)
@@ -636,12 +712,12 @@ struct TimelineSettingsView: View {
         let refinedCount = refinedEntriesForDay.count
 
         return HStack(alignment: .center, spacing: 14) {
-            // Left Date Block: Big Serif Day + 3 Stacked Lines (never stretches horizontally)
-            HStack(alignment: .center, spacing: 14) {
+            // Left Date Block: Big Serif Day + 3 Stacked Lines
+            HStack(alignment: .center, spacing: 16) {
                 Text(parts.dayNumber)
-                    .font(.system(size: 64, weight: .regular, design: .serif))
+                    .font(.system(size: 68, weight: .regular, design: .serif))
                     .foregroundStyle(primaryInk)
-                    .tracking(-1.5)
+                    .tracking(-1.8)
                     .fixedSize()
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -651,25 +727,14 @@ struct TimelineSettingsView: View {
                     Text(parts.yearMonthLabel)
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(secondaryInk)
-                    HStack(spacing: 6) {
+                    HStack(spacing: 7) {
                         Text(parts.relativeLabel)
                         Rectangle()
-                            .fill(primaryInk.opacity(0.18))
-                            .frame(width: 18, height: 1)
+                            .fill(primaryInk.opacity(0.20))
+                            .frame(width: 20, height: 1)
                         Text("记忆 \(totalRecordingDurationLabel)")
-                        if !dateFilteredEntries.isEmpty {
-                            Text("·")
-                            if unrefinedCount > 0 {
-                                Text("已提炼 \(refinedCount) · 未提炼 \(unrefinedCount)")
-                                    .foregroundStyle(warmAccent)
-                                    .fontWeight(.medium)
-                            } else {
-                                Text("已全部提炼 (\(refinedCount))")
-                                    .foregroundStyle(refinedGreen)
-                            }
-                        }
                     }
-                    .font(.system(size: 12, weight: .regular))
+                    .font(.system(size: 12.5, weight: .regular))
                     .foregroundStyle(secondaryInk)
                 }
                 .fixedSize()
@@ -677,8 +742,8 @@ struct TimelineSettingsView: View {
 
             Spacer(minLength: 10)
 
-            // Right Action Cluster: Explicitly Distinguishes Unrefined ("提炼新记录") vs Refined ("已全部提炼")
-            HStack(spacing: 8) {
+            // Right Action Cluster: Unrefined Action Pill (if any) + Auday Calendar Button [ 📅 ]
+            HStack(spacing: 10) {
                 if unrefinedCount > 0 {
                     Button {
                         runAgyTimelineSummarizer(newOnly: true)
@@ -692,109 +757,63 @@ struct TimelineSettingsView: View {
                                 .lineLimit(1)
                         }
                         .padding(.horizontal, 13)
-                        .padding(.vertical, 7)
-                        .background(
-                            Capsule()
-                                .fill(primaryInk),
-                        )
+                        .padding(.vertical, 7.5)
+                        .background(Capsule().fill(primaryInk))
                         .foregroundStyle(canvasBackground)
                     }
                     .buttonStyle(.plain)
                     .disabled(isRunningAction)
                     .fixedSize()
                     .help("仅对今日尚未提炼的 \(unrefinedCount) 段新记录执行 AI 摘要与重点提炼")
-                } else if refinedCount > 0 {
-                    Menu {
-                        Button {
-                            runAgyTimelineSummarizer(forceAll: true)
-                        } label: {
-                            Label("重新提炼今日全部 \(refinedCount) 段记录", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 11.5, weight: .semibold))
-                            Text("已全部提炼 (\(refinedCount))")
-                                .font(.system(size: 12, weight: .medium))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6.5)
-                        .background(
-                            Capsule()
-                                .fill(refinedGreen.opacity(0.11))
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(refinedGreen.opacity(0.28), lineWidth: 1),
-                                ),
-                        )
-                        .foregroundStyle(refinedGreen)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .disabled(isRunningAction)
-                    .fixedSize()
                 }
 
                 Menu {
-                    if unrefinedCount > 0 {
-                        Button {
-                            runAgyTimelineSummarizer(newOnly: true)
-                        } label: {
-                            Label("提炼未处理的 \(unrefinedCount) 段新记录", systemImage: "sparkles")
-                        }
-                    }
-                    if !dateFilteredEntries.isEmpty {
-                        Button {
-                            runAgyTimelineSummarizer(forceAll: true)
-                        } label: {
-                            Label("重新提炼今日全部时段", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        Divider()
-                    }
-
                     Button {
-                        NSWorkspace.shared.open(settings.effectiveOutputDir)
+                        selectedDate = Self.todayDateString()
                     } label: {
-                        Label("打开录音与文稿目录", systemImage: "folder")
+                        Label("回到今天 (\(Self.todayDateString()))", systemImage: "sun.max")
                     }
-
-                    Button {
-                        runDailyTimelineBuilder()
-                    } label: {
-                        Label("导出 Markdown 时间线汇总", systemImage: "doc.richtext")
-                    }
-
-                    Divider()
-
                     Button {
                         selectedDate = (selectedDate == "ALL") ? Self.todayDateString() : "ALL"
                     } label: {
                         Label(
-                            selectedDate == "ALL" ? "仅看当天记录" : "查看全部日期 (\(entries.count))",
+                            selectedDate == "ALL" ? "仅看单日记录" : "查看全部历史日期 (\(entries.count) 段)",
                             systemImage: "calendar",
                         )
                     }
-
+                    if availableDates.count > 1 {
+                        Divider()
+                        ForEach(availableDates.prefix(10), id: \.self) { d in
+                            Button {
+                                selectedDate = d
+                            } label: {
+                                Text(d == activeDate && selectedDate != "ALL" ? "✓ \(d)" : d)
+                            }
+                        }
+                    }
+                    Divider()
                     Button {
                         reloadTimeline()
                     } label: {
-                        Label("刷新列表", systemImage: "arrow.clockwise")
+                        Label("刷新今日记录", systemImage: "arrow.clockwise")
                     }
                 } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(primaryInk)
-                        .frame(width: 32, height: 32)
-                        .background(
-                            Circle()
-                                .strokeBorder(primaryInk.opacity(0.12), lineWidth: 1)
-                                .background(Circle().fill(primaryInk.opacity(0.04))),
-                        )
+                    Image(systemName: "calendar")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(primaryInk.opacity(0.82))
+                        .frame(width: 36, height: 36)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
-                .frame(width: 32, height: 32)
+                .frame(width: 36, height: 36)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(elevatedControlSurface.opacity(0.75))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(primaryInk.opacity(0.11), lineWidth: 1),
+                        ),
+                )
             }
             .fixedSize()
         }
@@ -1079,8 +1098,8 @@ struct TimelineSettingsView: View {
                         if unrefinedCount > 0 {
                             filterChip(title: "● 未提炼 \(unrefinedCount)", key: "UNREFINED", accent: warmAccent)
                         }
-                        if refinedCount > 0 {
-                            filterChip(title: "✓ 已提炼 \(refinedCount)", key: "REFINED", accent: refinedGreen)
+                        if refinedCount > 0, unrefinedCount > 0 {
+                            filterChip(title: "已提炼 \(refinedCount)", key: "REFINED")
                         }
                         filterChip(title: "多人会议", key: "MEETING")
                         filterChip(title: "当前关注", key: "VOICE_MEMO")
@@ -1099,6 +1118,48 @@ struct TimelineSettingsView: View {
                         .fixedSize()
                 }
                 .buttonStyle(.plain)
+            }
+
+            if unrefinedCount > 0, !isRunningAction {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("发现 \(unrefinedCount) 段新录音尚未提炼")
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(primaryInk)
+                        Text("已完成 Qwen3-ASR 转录，点击右侧按钮可仅对新增记录生成 AI 摘要与待办。")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(secondaryInk)
+                    }
+                    Spacer()
+                    Button {
+                        runAgyTimelineSummarizer(newOnly: true)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(warmAccent)
+                            Text("提炼新记录")
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(primaryInk)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(elevatedControlSurface)
+                                .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
+                                .overlay(Capsule().strokeBorder(primaryInk.opacity(0.09), lineWidth: 1)),
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(primaryInk.opacity(0.045)),
+                )
             }
 
             if filteredEntries.isEmpty {
@@ -1181,8 +1242,8 @@ struct TimelineSettingsView: View {
                 if isRefined {
                     Circle()
                         .stroke(
-                            entry.isVoiceMemoFocus ? warmAccent : refinedGreen.opacity(0.75),
-                            lineWidth: 1.4,
+                            entry.isVoiceMemoFocus ? warmAccent : primaryInk.opacity(0.32),
+                            lineWidth: 1.3,
                         )
                         .frame(width: 7, height: 7)
                 } else {
@@ -1208,22 +1269,21 @@ struct TimelineSettingsView: View {
 
             // Right Editorial Content Column
             VStack(alignment: .leading, spacing: 10) {
-                // Row 1: Explicit Refinement Badge ("✓ 已提炼" vs "● 未提炼") + Source Subtitle + Action/Duration
+                // Row 1: Calm Editorial Metadata for Refined vs Highlighted Action Pill for Unrefined
                 HStack(alignment: .center, spacing: 7) {
                     if isRefined {
-                        HStack(spacing: 3.5) {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .bold))
-                            Text("已提炼")
-                                .font(.system(size: 11, weight: .semibold))
-                        }
-                        .foregroundStyle(refinedGreen)
-                        .padding(.horizontal, 7.5)
-                        .padding(.vertical, 2.5)
-                        .background(
-                            Capsule()
-                                .fill(refinedGreen.opacity(0.11)),
-                        )
+                        Text(entry.sourceSubtitle)
+                            .font(.system(size: 12, weight: entry.isVoiceMemoFocus ? .medium : .regular))
+                            .foregroundStyle(entry.isVoiceMemoFocus ? warmAccent : secondaryInk)
+                            .lineLimit(1)
+
+                        Text("·")
+                            .font(.system(size: 12))
+                            .foregroundStyle(secondaryInk.opacity(0.5))
+
+                        Text("已提炼")
+                            .font(.system(size: 11.5, weight: .regular))
+                            .foregroundStyle(secondaryInk.opacity(0.8))
                     } else {
                         HStack(spacing: 4) {
                             Circle()
@@ -1239,12 +1299,12 @@ struct TimelineSettingsView: View {
                             Capsule()
                                 .fill(warmAccent.opacity(0.13)),
                         )
-                    }
 
-                    Text(entry.sourceSubtitle)
-                        .font(.system(size: 12, weight: entry.isVoiceMemoFocus ? .medium : .regular))
-                        .foregroundStyle(entry.isVoiceMemoFocus ? warmAccent : secondaryInk)
-                        .lineLimit(1)
+                        Text(entry.sourceSubtitle)
+                            .font(.system(size: 12, weight: entry.isVoiceMemoFocus ? .medium : .regular))
+                            .foregroundStyle(entry.isVoiceMemoFocus ? warmAccent : secondaryInk)
+                            .lineLimit(1)
+                    }
 
                     Spacer()
 
@@ -1914,6 +1974,7 @@ struct TimelineSettingsView: View {
 
 enum TimelineScanner {
     private static let stampRegex = try? NSRegularExpression(pattern: #"^(\d{8})_(\d{4,6})(?:_(.+))?$"#)
+    private static let recoveredInnerStampRegex = try? NSRegularExpression(pattern: #"recovered_recording_(\d{8})_(\d{4,6})"#)
     private static let hexSuffixRegex = try? NSRegularExpression(pattern: #"_[0-9a-fA-F]{8}$"#)
     private static let rawAudioOnlySlugRegex = try? NSRegularExpression(pattern: #"^\d{8}_\d{6}$"#)
     private static let speakerBracketRegex = try? NSRegularExpression(pattern: #"\]\s*(?:\[([^\]]+)\]|([^:\n]{1,20})):"#)
@@ -2010,17 +2071,11 @@ enum TimelineScanner {
             }
         }
 
-        let allKeys = Set(protocolFiles.keys).union(audioFiles.keys)
+        let allKeys = Set(protocolFiles.keys)
         var rawItems: [TimelineEntry] = []
 
         for key in allKeys {
             let pURL = protocolFiles[key]
-            if pURL == nil, let rx = rawAudioOnlySlugRegex {
-                let range = NSRange(key.startIndex ..< key.endIndex, in: key)
-                if rx.firstMatch(in: key, range: range) != nil {
-                    continue
-                }
-            }
             let aURL = audioFiles[key]
             let refURL = pURL ?? aURL
             let mtime = (try? refURL?.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
@@ -2069,7 +2124,166 @@ enum TimelineScanner {
             )
         }
 
-        return clusterVoiceMemos(rawItems, userNotes: userNotes)
+        let meetingItems = rawItems.filter { !$0.isVoiceMemoFocus }
+        let memoItems = rawItems.filter(\.isVoiceMemoFocus)
+        let clusteredMeetings = clusterMeetings(meetingItems, userNotes: userNotes)
+        let clusteredMemos = clusterVoiceMemos(memoItems, userNotes: userNotes)
+        return (clusteredMeetings + clusteredMemos).sorted { $0.sortKey > $1.sortKey }
+    }
+
+    /// Coalesces consecutive segments of the same multi-person meeting (`腾讯会议` / `企微多人评审`)
+    /// on the same day when the gap between the previous segment's end (`start + duration`) and the
+    /// next segment's start is `<= 18 minutes` (unaffected by any mid-meeting personal voice memos).
+    private static func clusterMeetings(_ items: [TimelineEntry], userNotes: [String: String]) -> [TimelineEntry] {
+        let sortedAsc = items.sorted { $0.sortKey < $1.sortKey }
+        var result: [TimelineEntry] = []
+        var currentCluster: [TimelineEntry] = []
+
+        func flushCluster() {
+            guard !currentCluster.isEmpty else { return }
+            if let merged = mergeMeetingCluster(currentCluster, userNotes: userNotes) {
+                result.append(merged)
+            }
+            currentCluster.removeAll()
+        }
+
+        for item in sortedAsc {
+            if let last = currentCluster.last {
+                let sameDate = last.dateString == item.dateString
+                let samePlatform = meetingPlatformKey(last) == meetingPlatformKey(item)
+                let lastStartMin = minutesSinceMidnight(last.timeString)
+                let lastDurMin = max(1, Int(ceil(last.durationSeconds / 60.0)))
+                let lastEndMin = lastStartMin + lastDurMin
+                let itemStartMin = minutesSinceMidnight(item.timeString)
+                let gapMin = itemStartMin - lastEndMin
+                if sameDate, samePlatform, gapMin <= 18 {
+                    currentCluster.append(item)
+                } else {
+                    flushCluster()
+                    currentCluster = [item]
+                }
+            } else {
+                currentCluster = [item]
+            }
+        }
+        flushCluster()
+        return result
+    }
+
+    private static func meetingPlatformKey(_ entry: TimelineEntry) -> String {
+        let lower = entry.rawTitle.lowercased()
+        if lower.contains("tencent") || entry.rawTitle.contains("腾讯会议") {
+            return "tencent_meeting"
+        }
+        if lower.contains("wwmapp") || entry.rawTitle.contains("企微") {
+            return "wecom_meeting"
+        }
+        return lower
+    }
+
+    private static func mergeMeetingCluster(_ cluster: [TimelineEntry], userNotes: [String: String]) -> TimelineEntry? {
+        guard let first = cluster.first else { return nil }
+        if cluster.count == 1 {
+            return first
+        }
+
+        let subClips: [TimelineSubClip] = cluster.map { item in
+            TimelineSubClip(
+                id: item.id,
+                timeString: item.hourMinuteString,
+                durationSeconds: item.durationSeconds,
+                summary: item.narrativeSummary,
+                transcriptText: item.fullTranscriptText,
+                audioURL: item.audioURL,
+                protocolURL: item.protocolURL,
+                isTrivialFragment: false,
+            )
+        }
+
+        let totalDur = cluster.reduce(0.0) { $0 + $1.durationSeconds }
+        var combinedSpeakers: [String] = []
+        var combinedHighlights: [String] = []
+        var combinedTodos: [String] = []
+        var combinedTags: [String] = []
+        for item in cluster {
+            for spk in item.speakerNames where !combinedSpeakers.contains(spk) {
+                combinedSpeakers.append(spk)
+            }
+            for h in item.highlights where !combinedHighlights.contains(h) {
+                combinedHighlights.append(h)
+            }
+            for t in item.todos where !combinedTodos.contains(t) {
+                combinedTodos.append(t)
+            }
+            for tg in item.tags where !combinedTags.contains(tg) {
+                combinedTags.append(tg)
+            }
+        }
+
+        let pendingSlugs = cluster.filter { !$0.isRefined }.map(\.id)
+        let allClusterRefined = pendingSlugs.isEmpty
+        let clusterNotes = cluster.compactMap { userNotes[$0.id] }.filter { !$0.isEmpty }
+
+        // Synthesize a non-repetitive cohesive narrative summary across the meeting segments
+        let refinedItems = cluster.filter(\.isRefined)
+        let combinedSummary: String
+        if refinedItems.isEmpty {
+            combinedSummary = first.narrativeSummary
+        } else if refinedItems.count == 1 {
+            combinedSummary = refinedItems[0].narrativeSummary
+        } else {
+            // Pick the primary synthesis from the longest refined segment and append any distinct final agenda segment
+            let longestEarly = refinedItems.dropLast().max(by: { $0.durationSeconds < $1.durationSeconds }) ?? refinedItems[0]
+            let lastItem = refinedItems.last!
+            let firstPart = longestEarly.narrativeSummary.trimmingCharacters(in: CharacterSet(charactersIn: "。； "))
+            if longestEarly.id == lastItem.id {
+                combinedSummary = "\(firstPart)。"
+            } else {
+                let strippedLast = lastItem.narrativeSummary
+                    .replacingOccurrences(
+                        of: #"^(?:你与[^，：]+?(?:评审|对齐|讨论)|一鸣与你(?:对齐|评审))"#,
+                        with: "随后评审",
+                        options: .regularExpression,
+                    )
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "。； "))
+                combinedSummary = "\(firstPart)；\(strippedLast)。"
+            }
+        }
+
+        let combinedTranscript = cluster.map { item in
+            "--- [\(item.hourMinuteString)] \(item.displayTitle) (\(item.id)) ---\n\(item.fullTranscriptText)"
+        }.joined(separator: "\n\n")
+
+        let mergedDigest: TimelineEntryDigest? = allClusterRefined
+            ? TimelineEntryDigest(
+                shortTitle: first.displayTitle,
+                summary: combinedSummary,
+                densityLabel: totalDur >= 600 ? "信息密集" : "信息适中",
+                highlightsCount: combinedHighlights.count,
+                tags: combinedTags,
+                highlights: combinedHighlights,
+                todos: combinedTodos,
+            )
+            : nil
+
+        return TimelineEntry(
+            id: first.id,
+            dateString: first.dateString,
+            timeString: first.timeString,
+            rawTitle: first.rawTitle,
+            protocolURL: first.protocolURL,
+            audioURL: first.audioURL,
+            transcriptPreview: first.transcriptPreview,
+            fullTranscriptText: combinedTranscript,
+            fileDate: first.fileDate,
+            durationSeconds: totalDur,
+            speakerNames: combinedSpeakers,
+            aiDigest: mergedDigest,
+            userNote: clusterNotes.first,
+            subClips: subClips,
+            foldedFragmentCount: 0,
+            unrefinedSlugs: pendingSlugs,
+        )
     }
 
     /// Groups consecutive short `语音输入速记` clips within a 12-minute window into consolidated
@@ -2240,6 +2454,17 @@ enum TimelineScanner {
 
     private static func parseSlug(_ key: String, fallbackDate: Date) -> (String, String, String) {
         let ns = key as NSString
+        if let recRx = recoveredInnerStampRegex,
+           let recMatch = recRx.firstMatch(in: key, range: NSRange(location: 0, length: ns.length)) {
+            let dRaw = ns.substring(with: recMatch.range(at: 1))
+            let tRaw = ns.substring(with: recMatch.range(at: 2))
+            let dateStr = "\(dRaw.prefix(4))-\(dRaw.dropFirst(4).prefix(2))-\(dRaw.suffix(2))"
+            let hh = tRaw.prefix(2)
+            let mm = tRaw.dropFirst(2).prefix(2)
+            let ss = tRaw.count >= 6 ? String(tRaw.suffix(2)) : "00"
+            return (dateStr, "\(hh):\(mm):\(ss)", "tencent_meeting_call")
+        }
+
         if let regex = stampRegex,
            let match = regex.firstMatch(in: key, range: NSRange(location: 0, length: ns.length)) {
             let dRaw = ns.substring(with: match.range(at: 1))

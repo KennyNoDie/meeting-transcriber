@@ -62,24 +62,28 @@
             let windowID = CGWindowID(window.windowNumber)
             do {
                 let content = try await SCShareableContent.current
-                guard let scWindow = content.windows.first(where: { $0.windowID == windowID }) else {
-                    return nil
+                if let scWindow = content.windows.first(where: { $0.windowID == windowID }) {
+                    let filter = SCContentFilter(desktopIndependentWindow: scWindow)
+                    let config = SCStreamConfiguration()
+                    let scale = window.backingScaleFactor
+                    config.width = max(Int(scWindow.frame.width * scale), 1)
+                    config.height = max(Int(scWindow.frame.height * scale), 1)
+                    config.showsCursor = false
+                    let cgImage = try await SCScreenshotManager.captureImage(
+                        contentFilter: filter, configuration: config,
+                    )
+                    let rep = NSBitmapImageRep(cgImage: cgImage)
+                    return rep.representation(using: .png, properties: [:])
                 }
-                let filter = SCContentFilter(desktopIndependentWindow: scWindow)
-                let config = SCStreamConfiguration()
-                let scale = window.backingScaleFactor
-                config.width = max(Int(scWindow.frame.width * scale), 1)
-                config.height = max(Int(scWindow.frame.height * scale), 1)
-                config.showsCursor = false
-                let cgImage = try await SCScreenshotManager.captureImage(
-                    contentFilter: filter, configuration: config,
-                )
-                let rep = NSBitmapImageRep(cgImage: cgImage)
-                return rep.representation(using: .png, properties: [:])
             } catch {
-                logger.warning("Screenshot capture failed: \(error.localizedDescription, privacy: .public)")
-                return nil
+                logger.warning("SCK screenshot failed (\(error.localizedDescription, privacy: .public)), falling back to AppKit cacheDisplay")
             }
+            let targetView = window.contentView?.superview ?? window.contentView
+            guard let view = targetView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+            else { return nil }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            return rep.representation(using: .png, properties: [:])
         }
     }
 #endif
