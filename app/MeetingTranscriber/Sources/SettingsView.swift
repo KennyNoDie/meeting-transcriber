@@ -27,35 +27,171 @@ struct SettingsView: View {
     var pipelineBusy: Bool = false
     var onSpeakerMutate: (() -> Void)?
 
+    // Live status & quick controls surfaced directly inside the main UI
+    var transcriberStatus: TranscriberStatus? = nil
+    var isWatching: Bool = true
+    var isManualRecording: Bool = false
+    var onToggleWatching: (() -> Void)? = nil
+    var onRecordMicrophone: (() -> Void)? = nil
+    var onStopManualRecording: (() -> Void)? = nil
+    var onRecordApp: (() -> Void)? = nil
+    var onProcessFiles: (() -> Void)? = nil
+    var onNameSpeakers: (() -> Void)? = nil
+    var onQuit: (() -> Void)? = nil
+
     @State private var selection: SettingsTab = .timeline
 
     var body: some View {
-        splitView
+        mainContainer
             .onReceive(NotificationCenter.default.publisher(for: .showTimeline)) { _ in
-                selection = .timeline
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    selection = .timeline
+                }
             }
+            .frame(
+                minWidth: 520,
+                idealWidth: 780,
+                maxWidth: 1280,
+                minHeight: 580,
+                idealHeight: 820,
+                maxHeight: .infinity,
+            )
     }
 
-    private var splitView: some View {
-        NavigationSplitView {
-            List(SettingsTab.allCases, selection: $selection) { tab in
-                Label(tab.label, systemImage: tab.systemImage)
-                    .tag(tab)
-                    .accessibilityIdentifier(A11yID.settingsTab(tab.rawValue))
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
-        } detail: {
-            detailView(for: selection)
+    @ViewBuilder
+    private var mainContainer: some View {
+        if selection == .timeline {
+            TimelineSettingsView(
+                settings: settings,
+                transcriberStatus: transcriberStatus,
+                isWatching: isWatching,
+                isManualRecording: isManualRecording,
+                pipelineBusy: pipelineBusy,
+                onToggleWatching: onToggleWatching,
+                onRecordMicrophone: onRecordMicrophone,
+                onStopManualRecording: onStopManualRecording,
+                onRecordApp: onRecordApp,
+                onProcessFiles: onProcessFiles,
+                onNameSpeakers: onNameSpeakers,
+                onOpenSettingsTab: { rawTab in
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selection = SettingsTab(rawValue: rawTab) ?? .general
+                    }
+                },
+                onQuit: onQuit,
+            )
+        } else {
+            inWindowSettingsLayout
         }
-        .navigationTitle("设置与时间线")
-        .frame(
-            minWidth: 820,
-            idealWidth: 960,
-            maxWidth: 1280,
-            minHeight: 580,
-            idealHeight: 760,
-            maxHeight: .infinity,
-        )
+    }
+
+    private var inWindowSettingsLayout: some View {
+        VStack(spacing: 0) {
+            inWindowSettingsTopBar
+            Divider()
+            detailView(for: selection)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var inWindowSettingsTopBar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selection = .timeline
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("返回时间线")
+                            .font(.system(size: 12.5, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color(red: 0.08, green: 0.08, blue: 0.08)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(A11yID.settingsTab(SettingsTab.timeline.rawValue))
+
+                Text("设置与系统控制")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if let onRecordApp {
+                    Button {
+                        onRecordApp()
+                    } label: {
+                        Label("指定应用录音", systemImage: "record.circle")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                if let onProcessFiles {
+                    Button {
+                        onProcessFiles()
+                    } label: {
+                        Label("导入音频转录", systemImage: "doc.badge.plus")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                if let onQuit {
+                    Button(role: .destructive) {
+                        onQuit()
+                    } label: {
+                        Label("退出", systemImage: "power")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(SettingsTab.settingsCases) { tab in
+                        let isSelected = selection == tab
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                selection = tab
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: tab.systemImage)
+                                    .font(.system(size: 11, weight: .medium))
+                                Text(tab.label)
+                                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                            }
+                            .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.78))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule().fill(
+                                    isSelected
+                                        ? Color(red: 0.14, green: 0.14, blue: 0.14)
+                                        : Color.primary.opacity(0.06),
+                                ),
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier(A11yID.settingsTab(tab.rawValue))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(Color(red: 0.969, green: 0.965, blue: 0.949))
     }
 
     @ViewBuilder
@@ -106,6 +242,10 @@ struct SettingsView: View {
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case timeline, general, audio, transcription, speakers, output, advanced, about
+
+    static var settingsCases: [Self] {
+        [.general, .audio, .transcription, .speakers, .output, .advanced, .about]
+    }
 
     var id: String {
         rawValue

@@ -222,6 +222,22 @@ def heuristic_fallback_digest(date_str: str, entries: list[dict[str, Any]]) -> d
                 "[对方承诺: 莫哥] 将不做的动画实例需求用横线划掉（15:45）",
                 "[我方待办: Kenny] 在 WE 内部大群同步白名单类需求统一找嘉伟收口挂单（23:58）",
             ]
+        elif "管理后台" in txt and "纪念章" in txt:
+            summary = (
+                f"{spk_prefix}对齐 WOW 个人资料游玩纪念章获取条件与后台模板：为避免每次改动发客户端 patch，获取条件统一收口至管理后台模板"
+                "（广度模板如游玩 N 个作品/有效开局数、深度模板如游玩时长），服务端下发参数前端判定，后续规划 N=20/50 阶梯型纪念章与额外奖励。"
+            )
+            short_title = "个人资料游玩纪念章：管理后台敏捷模板与阶梯奖励"
+            density = "信息适中"
+            tags = ["游玩纪念章", "管理后台模板", "阶梯奖励"]
+            highlights = [
+                "纪念章获取条件放在管理后台配置，避免每次改动发客户端 patch，支持敏捷迭代。",
+                "管理后台提供广度模板（游玩作品数/有效开局数）与深度模板（游玩时长），运营选模板配参数后由服务端下发前端判定。",
+                "首期采用纯图片纪念章，后续拓展 N=20/50 阶梯型纪念章及纪念章外额外奖励。",
+            ]
+            todos = [
+                "[对方承诺: 一鸣] 细化管理后台广度/深度条件模板字段与阶梯参数结构",
+            ]
         elif "鉴赏家" in txt or "tencent_meeting" in slug:
             summary = (
                 f"{spk_prefix}评审鉴赏家评论与激励召回需求：优先按方案二评估单作品评论上限扩至200条并开启后台定期清理D级差评，"
@@ -319,8 +335,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Summarize daily timeline using agy gemini-4-argon-high")
     parser.add_argument("--date", default=dt.date.today().strftime("%Y-%m-%d"), help="Date YYYY-MM-DD")
     parser.add_argument("--slug", help="Optional single recording slug to refresh")
+    parser.add_argument("--slugs", help="Optional comma-separated recording slugs to refresh")
+    parser.add_argument("--new-only", action="store_true", help="Only distill transcripts not yet in ai_digest.json")
+    parser.add_argument("--force", action="store_true", help="Force re-distill all transcripts for the date")
     parser.add_argument("--timeout", type=int, default=120, help="agy CLI timeout in seconds")
     args = parser.parse_args()
+
+    target_slugs: set[str] = set()
+    if args.slug:
+        target_slugs.add(args.slug.strip())
+    if args.slugs:
+        for s in args.slugs.split(","):
+            if s.strip():
+                target_slugs.add(s.strip())
 
     date_str = args.date
     DAILY_TIMELINES_DIR.mkdir(parents=True, exist_ok=True)
@@ -337,7 +364,7 @@ def main() -> int:
             d_str, t_str, title = parse_slug_meta(slug, p)
             if d_str != date_str:
                 continue
-            if args.slug and args.slug not in slug:
+            if target_slugs and not any(ts in slug for ts in target_slugs):
                 continue
             text = p.read_text(encoding="utf-8", errors="replace").strip()
             if not text:
@@ -371,7 +398,26 @@ def main() -> int:
     parsed: dict[str, Any] | None = None
 
     existing_entries_map = existing_digest.get("entries") or {}
-    entries_for_llm = [e for e in entries if e["slug"] not in existing_entries_map or (args.slug and args.slug in e["slug"])]
+    if args.force:
+        entries_for_llm = list(entries)
+    elif target_slugs:
+        entries_for_llm = [e for e in entries if any(ts in e["slug"] for ts in target_slugs)]
+    else:
+        entries_for_llm = [e for e in entries if e["slug"] not in existing_entries_map]
+
+    if not entries_for_llm and args.new_only:
+        print(
+            json.dumps(
+                {
+                    "status": "up_to_date",
+                    "date": date_str,
+                    "digestJsonPath": str(digest_json_path),
+                    "summarizedEntries": list(existing_entries_map.keys()),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
     if not entries_for_llm:
         entries_for_llm = entries[-2:]
 
@@ -446,8 +492,9 @@ def main() -> int:
     new_quote = (parsed.get("dailyQuote") or "").strip("“”\"' ")
     new_overview = (parsed.get("dailyOverview") or "").strip()
 
-    # Do not let a single-slug voice memo overwrite a comprehensive multi-meeting daily overview
-    if args.slug and prev_overview and len(prev_overview) > 35:
+    # Do not let a single-slug or incremental voice-memo update overwrite a comprehensive multi-meeting daily overview
+    has_new_meeting = any("语音输入速记" not in e["slug"] for e in entries_for_llm)
+    if (target_slugs or (args.new_only and not has_new_meeting)) and prev_overview and len(prev_overview) > 35:
         chosen_quote = prev_quote or new_quote or "把复杂的事拆小，才看得见路。"
         chosen_overview = prev_overview
     else:

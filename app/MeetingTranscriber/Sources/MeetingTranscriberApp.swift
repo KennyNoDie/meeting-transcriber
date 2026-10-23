@@ -80,6 +80,34 @@ private struct WindowAccessor: NSViewRepresentable {
     }
 }
 
+/// Intercepts left-clicks on the app's menu bar status item (`NSStatusBarWindow`)
+/// so clicking the top menu bar icon directly opens and brings the main Timeline UI
+/// window (`id: "settings"`) to the front instead of showing a dropdown menu.
+@MainActor
+private final class StatusBarDirectOpenMonitor {
+    static let shared = StatusBarDirectOpenMonitor()
+    private var localMonitor: Any?
+
+    func installIfNeeded() {
+        guard localMonitor == nil else { return }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { event in
+            guard let window = event.window else { return event }
+            let className = String(describing: type(of: window))
+            guard className.contains("StatusBar") else { return event }
+            if event.modifierFlags.contains(.control) {
+                return event
+            }
+            if event.type == .leftMouseDown {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .showSettings, object: nil)
+                    NotificationCenter.default.post(name: .showTimeline, object: nil)
+                }
+            }
+            return nil
+        }
+    }
+}
+
 // Not @main — AppLauncher owns the entry point so a selftest launch can
 // divert before this scene (and AppState with it) is ever constructed.
 struct MeetingTranscriberApp: App {
@@ -91,6 +119,9 @@ struct MeetingTranscriberApp: App {
     init() {
         AppPaths.migrateIfNeeded()
         NotificationManager.shared.setUp()
+        MainActor.assumeIsolated {
+            StatusBarDirectOpenMonitor.shared.installIfNeeded()
+        }
         // The verdict was taken in `AppLauncher.main()`, before `AppState` was
         // built. It is reported here because this is the first point at which
         // the notification centre is set up (issue #703).
@@ -129,6 +160,7 @@ struct MeetingTranscriberApp: App {
         } label: {
             menuBarLabel
         }
+        .menuBarExtraStyle(.window)
 
         speakerNamingWindow
         settingsWindow
@@ -138,32 +170,20 @@ struct MeetingTranscriberApp: App {
     // MARK: - Menu Bar
 
     private var menuBarContent: some View {
-        MenuBarView(
-            status: appState.currentStatus,
-            isWatching: appState.isWatching,
-            pipelineQueue: appState.pipelineQueue,
-            updateChecker: appState.updateChecker,
-            onStartStop: { appState.watching.toggleWatching() },
-            onRecordApp: { bringWindowToFront(id: "record-app") },
-            onRecordMicrophone: { appState.watching.startMicrophoneRecording() },
-            noMic: appState.settings.noMic,
-            manualRecordingPendingOrActive: appState.watching.isManualRecording,
-            onStopManualRecording: appState.isManualRecording ? {
-                appState.watching.stopManualRecording()
-            } : nil,
-            onOpenLastProtocol: openLastProtocol,
-            onOpenProtocol: { url in NSWorkspace.shared.open(url) },
-            onOpenProtocolsFolder: openProtocolsFolder,
-            onOpenSettings: {
-                bringWindowToFront(id: "settings")
-            },
-            onNameSpeakers: appState.hasPendingSpeakerNamingJobs ? {
-                bringWindowToFront(id: "speaker-naming")
-            } : nil,
-            onProcessFiles: processAudioFiles,
-            onDismissJob: { id in appState.pipelineQueue.removeJob(id: id) },
-            onQuit: quit,
-        )
+        Color.clear
+            .frame(width: 1, height: 1)
+            .onAppear {
+                DispatchQueue.main.async {
+                    for window in NSApp.windows {
+                        let cls = String(describing: type(of: window))
+                        if cls.contains("MenuBarExtra") || cls.contains("Popover") {
+                            window.orderOut(nil)
+                        }
+                    }
+                    bringWindowToFront(id: "settings")
+                    NotificationCenter.default.post(name: .showTimeline, object: nil)
+                }
+            }
     }
 
     private var menuBarLabel: some View {
@@ -256,7 +276,7 @@ struct MeetingTranscriberApp: App {
     }
 
     private var settingsWindow: some Scene {
-        Window("MeetingTranscriber · 设置与时间线", id: "settings") {
+        Window("MeetingTranscriber", id: "settings") {
             SettingsView(
                 settings: appState.settings,
                 qwen3Engine: appState.engines.qwen3Engine,
@@ -276,6 +296,20 @@ struct MeetingTranscriberApp: App {
                 namingDialogActive: appState.pipeline.queue.pendingSpeakerNaming != nil,
                 pipelineBusy: appState.pipeline.queue.isProcessing,
                 onSpeakerMutate: appState.pipeline.queue.refreshKnownSpeakerNames,
+                transcriberStatus: appState.currentStatus,
+                isWatching: appState.isWatching,
+                isManualRecording: appState.watching.isManualRecording,
+                onToggleWatching: { appState.watching.toggleWatching() },
+                onRecordMicrophone: { appState.watching.startMicrophoneRecording() },
+                onStopManualRecording: appState.isManualRecording ? {
+                    appState.watching.stopManualRecording()
+                } : nil,
+                onRecordApp: { bringWindowToFront(id: "record-app") },
+                onProcessFiles: processAudioFiles,
+                onNameSpeakers: appState.hasPendingSpeakerNamingJobs ? {
+                    bringWindowToFront(id: "speaker-naming")
+                } : nil,
+                onQuit: quit,
             )
         }
         .windowResizability(.contentSize)
