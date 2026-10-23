@@ -129,12 +129,13 @@ def build_prompt_for_date(
 
 ### 写作风格与纪律（Auday Editorial 规范）
 1. **第二人称主视角**：文本中的 `[Kenny]`（或 `册少`）就是用户本人，摘要中一律称呼为 **「你」**；其他已具名同事（如 `一鸣`、`老丁`、`莫哥`、`俊尧`、`嘉伟`、`静恒`）直呼其名，未具名的管理端研发/主持统称「管理端研发」或「研发同学」。
-2. **区分【多人会议】与【你的主动语音速记 / 当前关注重点】**：
-   - 当时段为 `企微会议` / `腾讯会议` 等多人讨论时，用**一段 45~85 字的高密度中文陈述句**写清「你与谁围绕什么议题展开讨论 + 最终确认/拍板了什么具体方案或分工」。禁止“本次会议讨论了…”等公文套话。
-   - 当时段为 `语音输入速记`（或仅有 `[Kenny]` 发言的短语音）时，这是**你通过麦克风主动输入的思考、指令或当前关注重点**！摘要应提炼为你当前正在推进的核心意图或规则定义（如「你聚焦…明确…」），并在 `tags` 中标记 `"当前关注"` 或 `"主动速记"`，同时将其纳入 `dailyOverview` 的个人关注主线。
-3. **每日金句（`dailyQuote`）与全天总览（`dailyOverview`）**：必须综合「当日已归档的其他时段摘要」与「本次待提炼的转写记录」，提炼一句 10~18 字、克制有洞察的中文短句作为 `dailyQuote`，并用 45~85 字概括全天的多人会议拍板结论与个人主动语音关注主线作为 `dailyOverview`。
-4. **信息密度标签（`densityLabel`）**：按讨论长度与决策数选填 `"信息密集"`、`"信息适中"` 或 `"轻量速记"`（或 `"当前关注"`）。
-5. **重点与待办严格溯源**：`highlights` 提炼 1~6 条已确认的核心结论或关注点；`todos` 仅提取原话明确承诺的跟进项（标注 `[我方待办]` 或 `[对方承诺: 姓名]`）。
+2. **严格执行【三分类鉴别：多人会议 vs 你的业务关注点 vs 无重点提示词/碎片】**：
+   - **多人会议（`企微会议` / `腾讯会议`）**：用**一段 45~85 字的高密度中文陈述句**写清「你与谁围绕什么议题展开讨论 + 最终确认/拍板了什么具体方案或分工」。禁止“本次会议讨论了…”等公文套话。
+   - **你的主动语音输入 · 当前业务关注点**：当你在 `语音输入速记` 中推敲产品机制、回流设计、组队激励、汇报逻辑等实质业务内容时，提炼为你当前正在推进的核心业务思考（如「你梳理回流系统首页三栏结构，明确…」），标记 `"densityLabel": "当前关注"`，并提炼 1~3 条业务重点纳入 `dailyOverview`。
+   - **无重点的 AI 提示词 / 工具调试指令 / 零碎口语（重要！）**：如果某段 `语音输入速记` 只是对 AI 助手口述软件修改指令（如“每次开始录制都会弹通知”“状态栏给个动效”“注意总结内容提示词”“界面拉窄后UI异常”），或是语义残缺的极短口语碎片（如“是会有的，上学应该培养”“这相当是在现在的农村上”），**绝不要强行编造重点**！必须将该条目的 `"highlightsCount"` 设为 `0`、`"highlights"` 设为 `[]`、`"densityLabel"` 设为 `"碎片输入"`，且**严禁将这类工具指令或口语碎片写入 `dailyQuote` 与 `dailyOverview`**。
+3. **每日金句（`dailyQuote`）与全天总览（`dailyOverview`）**：必须综合「当日已归档的其他时段摘要」与「本次待提炼的转写记录」，提炼一句 10~18 字、克制有洞察的中文短句作为 `dailyQuote`（不要加引号），并用 45~85 字概括全天的多人会议拍板结论与你的实质业务关注主线作为 `dailyOverview`。
+4. **信息密度标签（`densityLabel`）**：按性质选填 `"信息密集"`、`"信息适中"`、`"当前关注"` 或 `"碎片输入"`。
+5. **重点与待办严格溯源**：实质会议与业务思考提炼 1~6 条 `highlights`；无实质重点的提示词/碎片设 `highlights: []`；`todos` 仅提取原话明确承诺的跟进项（标注 `[我方待办]` 或 `[对方承诺: 姓名]`）。
 
 ### 输出 JSON 结构（必须严格匹配此 Schema）
 {{
@@ -417,9 +418,19 @@ def main() -> int:
         for k, v in (existing_digest.get("entries") or {}).items()
         if k in existing_files
     }
+    transcript_by_slug = {e["slug"]: e.get("transcript", "") for e in entries}
+    meta_prompt_keywords = ("弹通知", "状态栏", "提示词", "界面拉窄", "增加更多的通知", "语音输入法")
+
     for k, v in (parsed.get("entries") or {}).items():
         if k not in existing_files:
             continue
+        raw_t = transcript_by_slug.get(k, "")
+        clean_t = re.sub(r"^\[[^\]]+\]\s*(?:\[[^\]]+\]|[^:]+):\s*", "", raw_t, flags=re.MULTILINE).strip()
+        if "语音输入速记" in k and (any(kw in clean_t for kw in meta_prompt_keywords) or len(clean_t) < 22):
+            v["densityLabel"] = "碎片输入"
+            v["highlights"] = []
+            v["highlightsCount"] = 0
+            v["todos"] = []
         if k in user_notes and user_notes[k]:
             note_hl = f"[我的备注] {user_notes[k]}"
             hls = list(v.get("highlights") or [])
@@ -430,12 +441,25 @@ def main() -> int:
         merged_entries[k] = v
 
     total_hl = sum(int(v.get("highlightsCount") or len(v.get("highlights") or [])) for v in merged_entries.values())
+    prev_quote = existing_digest.get("dailyQuote") or ""
+    prev_overview = existing_digest.get("dailyOverview") or ""
+    new_quote = (parsed.get("dailyQuote") or "").strip("“”\"' ")
+    new_overview = (parsed.get("dailyOverview") or "").strip()
+
+    # Do not let a single-slug voice memo overwrite a comprehensive multi-meeting daily overview
+    if args.slug and prev_overview and len(prev_overview) > 35:
+        chosen_quote = prev_quote or new_quote or "把复杂的事拆小，才看得见路。"
+        chosen_overview = prev_overview
+    else:
+        chosen_quote = new_quote or prev_quote or "把复杂的事拆小，才看得见路。"
+        chosen_overview = new_overview or prev_overview
+
     final_digest = {
         "date": date_str,
         "generatedAt": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "model": model_used,
-        "dailyQuote": parsed.get("dailyQuote") or existing_digest.get("dailyQuote") or "把复杂的事拆小，才看得见路。",
-        "dailyOverview": parsed.get("dailyOverview") or existing_digest.get("dailyOverview") or "",
+        "dailyQuote": chosen_quote,
+        "dailyOverview": chosen_overview,
         "totalHighlightsCount": total_hl,
         "entries": merged_entries,
     }

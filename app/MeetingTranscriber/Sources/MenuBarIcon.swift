@@ -148,13 +148,55 @@ enum MenuBarIcon {
         return frames[animationFrame % frames.count]
     }
 
-    /// Simplified 4-state crisp 18x18 menu bar image (fixed compact width, zero choppy animation):
+    /// Pre-cached 10-frame spring transition when entering `.recording` from idle (18x18pt).
+    private static let startRecordingTransitionCache: [NSImage] = (0 ..< 10).map { step in
+        let iconSize = NSSize(width: 18, height: 18)
+        let t = Double(step + 1) / 10.0
+        // Damped spring overshoot curve
+        let spring = min(1.12, 1.0 - exp(-4.5 * t) * cos(6.5 * t))
+        let idle: [Double] = [0.14, 0.22, 0.30, 0.22, 0.14]
+        let active: [Double] = [0.46, 0.78, 0.96, 0.74, 0.46]
+        let heights = zip(idle, active).map { CGFloat($0 + ($1 - $0) * spring) }
+        let img = NSImage(size: iconSize, flipped: false) { rect in
+            NSColor.systemGreen.setFill()
+            drawCustomWaveform(in: rect, heights: heights)
+            drawPulseHaloAndDot(in: rect, color: NSColor.systemGreen, progress: CGFloat(t))
+            return true
+        }
+        img.isTemplate = false
+        return img
+    }
+
+    /// Pre-cached 16-frame smooth sinusoidal recording waveform loop (18x18pt, zero runtime redraw overhead).
+    private static let recordingWaveCache: [NSImage] = (0 ..< 16).map { step in
+        let iconSize = NSSize(width: 18, height: 18)
+        let phase = Double(step) / 16.0 * (2.0 * Double.pi)
+        let base: [Double] = [0.42, 0.68, 0.84, 0.66, 0.42]
+        let amp: [Double] = [0.16, 0.22, 0.14, 0.22, 0.16]
+        let offsets: [Double] = [0.0, 0.9, 1.8, 2.7, 3.6]
+        let heights = (0 ..< 5).map { idx in
+            CGFloat(max(0.22, min(0.96, base[idx] + amp[idx] * sin(phase + offsets[idx]))))
+        }
+        let dotScale = CGFloat(0.88 + 0.12 * sin(phase))
+        let img = NSImage(size: iconSize, flipped: false) { rect in
+            NSColor.systemGreen.setFill()
+            drawCustomWaveform(in: rect, heights: heights)
+            drawStatusDot(in: rect, color: NSColor.systemGreen, scale: dotScale)
+            return true
+        }
+        img.isTemplate = false
+        return img
+    }
+
+    /// Simplified 4-state crisp 18x18 menu bar image with smooth transition & wave animation:
     /// 1. 没录（Idle）: low-amplitude calm monochrome template waveform (18x18).
-    /// 2. 在录（Recording - Normal）: vibrant green full-amplitude active call waveform + green live dot (18x18).
+    /// 2. 在录（Recording - Normal）: 10-frame spring-up transition + 16-frame smooth green sinusoidal wave (18x18).
     /// 3. 在录但没声音 / 权限异常（Silent / Fault）: full red waveform + red exclamation mark (18x18).
     /// 4. 转录状态（Transcribing / Diarizing / Processing）: blue horizontal text lines + blue dot (18x18).
     static func statusBarImage(
         badge: BadgeKind,
+        animationTick: Int = 0,
+        transitionStep: Int = 10,
         permissionOverlay: Bool = false,
         recordOnlyOverlay: Bool = false,
         micSilentOverlay: Bool = false,
@@ -169,7 +211,7 @@ enum MenuBarIcon {
         if !isSilentOrError, !isTranscribingState, !isRecordingNormal, !recordOnlyOverlay {
             let img = NSImage(size: iconSize, flipped: false) { rect in
                 NSColor.black.setFill()
-                drawCustomWaveform(in: rect, heights: [0.16, 0.28, 0.42, 0.26, 0.16])
+                drawCustomWaveform(in: rect, heights: [0.14, 0.22, 0.30, 0.22, 0.14])
                 if badge == .updateAvailable {
                     drawUpdateArrow(in: rect)
                 }
@@ -179,19 +221,23 @@ enum MenuBarIcon {
             return img
         }
 
+        // State 2: 在录 (Normal Recording) -> Play 10-frame spring transition then loop 16-frame wave
+        if isRecordingNormal {
+            if transitionStep < startRecordingTransitionCache.count {
+                return startRecordingTransitionCache[max(0, transitionStep)]
+            }
+            return recordingWaveCache[abs(animationTick) % recordingWaveCache.count]
+        }
+
         let isDark = NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let fgColor = isDark ? NSColor.white : NSColor.black
 
-        // State 2 / 3 / 4: Fixed 18x18 non-template image with distinct color & shape
+        // State 3 / 4: Fixed 18x18 non-template image with distinct color & shape
         let img = NSImage(size: iconSize, flipped: false) { rect in
             if isSilentOrError {
                 NSColor.systemRed.setFill()
                 drawCustomWaveform(in: rect, heights: [0.35, 0.65, 0.88, 0.60, 0.35])
                 drawExclamationBadge(in: rect)
-            } else if isRecordingNormal {
-                NSColor.systemGreen.setFill()
-                drawCustomWaveform(in: rect, heights: [0.42, 0.76, 0.96, 0.72, 0.44])
-                drawStatusDot(in: rect, color: NSColor.systemGreen)
             } else if isTranscribingState {
                 NSColor.systemBlue.setFill()
                 drawTranscribingAnimation(in: rect, frame: 5)
@@ -224,14 +270,35 @@ enum MenuBarIcon {
         }
     }
 
-    private static func drawStatusDot(in rect: NSRect, color: NSColor) {
-        let size: CGFloat = 5.6
-        let margin: CGFloat = 0.5
-        let cx = rect.maxX - size / 2 - margin
-        let cy = rect.minY + size / 2 + margin
+    private static func drawStatusDot(in rect: NSRect, color: NSColor, scale: CGFloat = 1.0) {
+        let baseSize: CGFloat = 5.4
+        let size = baseSize * scale
+        let margin: CGFloat = 0.6
+        let cx = rect.maxX - baseSize / 2 - margin
+        let cy = rect.minY + baseSize / 2 + margin
         color.setFill()
         NSBezierPath(
             ovalIn: NSRect(x: cx - size / 2, y: cy - size / 2, width: size, height: size),
+        ).fill()
+    }
+
+    private static func drawPulseHaloAndDot(in rect: NSRect, color: NSColor, progress: CGFloat) {
+        let baseSize: CGFloat = 5.4
+        let margin: CGFloat = 0.6
+        let cx = rect.maxX - baseSize / 2 - margin
+        let cy = rect.minY + baseSize / 2 + margin
+        let haloRadius = baseSize * (0.9 + 1.1 * progress)
+        color.withAlphaComponent(max(0, 0.55 * (1.0 - progress))).setStroke()
+        let haloPath = NSBezierPath(
+            ovalIn: NSRect(x: cx - haloRadius / 2, y: cy - haloRadius / 2, width: haloRadius, height: haloRadius),
+        )
+        haloPath.lineWidth = 1.2
+        haloPath.stroke()
+
+        let dotSize = baseSize * min(1.0, 0.5 + 0.6 * progress)
+        color.setFill()
+        NSBezierPath(
+            ovalIn: NSRect(x: cx - dotSize / 2, y: cy - dotSize / 2, width: dotSize, height: dotSize),
         ).fill()
     }
 

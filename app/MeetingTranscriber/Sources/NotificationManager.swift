@@ -83,16 +83,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
         isSetUp = true
         scheduler.setDelegate(self)
         scheduler.setCategories([Self.makeConsentCategory()])
-        scheduler.requestAuthorization()
+        if scheduler is SystemNotificationScheduler {
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        } else {
+            scheduler.requestAuthorization()
+        }
     }
-
-    private static let silentRoutineTitles: Set<String> = [
-        "Meeting Detected",
-        "Manual Recording",
-        "Transcript Saved",
-        "Protocol Ready",
-        PreviousExitNotice.title,
-    ]
 
     func notify(title: String, body: String, urgency: NotificationUrgency) {
         let deliverable = deliverableOrLogDrop()
@@ -109,10 +105,10 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
 
         guard deliverable else { return }
 
-        // Suppress routine start/done macOS system banners in production; the
-        // menu bar icon provides immediate visual feedback without interrupting
-        // the user's workflow.
-        if scheduler is SystemNotificationScheduler, Self.silentRoutineTitles.contains(title) {
+        // Suppress all macOS system notification banners in production; the
+        // animated menu bar icon provides immediate visual feedback without
+        // interrupting the user's workflow.
+        if scheduler is SystemNotificationScheduler {
             return
         }
 
@@ -372,9 +368,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
         )
     }
 
-    // Show notifications even when app is in foreground
+    // Suppress foreground banners/sounds; status bar icon handles state indication
     // swiftlint:disable:next async_without_await
     func userNotificationCenter(_: UNUserNotificationCenter, willPresent _: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        []
     }
 }

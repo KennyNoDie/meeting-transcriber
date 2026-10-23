@@ -2,17 +2,7 @@ import AppKit
 import AVFoundation
 import SwiftUI
 
-// MARK: - AI Digest & User Notes Models
-
-struct TimelineEntryDigest: Codable {
-    var shortTitle: String?
-    var summary: String?
-    var densityLabel: String?
-    var highlightsCount: Int?
-    var tags: [String]?
-    var highlights: [String]?
-    var todos: [String]?
-}
+// MARK: - AI Digest Codable Models
 
 struct DailyTimelineDigest: Codable {
     var date: String
@@ -24,77 +14,134 @@ struct DailyTimelineDigest: Codable {
     var entries: [String: TimelineEntryDigest]?
 }
 
+struct TimelineEntryDigest: Codable {
+    var shortTitle: String?
+    var summary: String?
+    var densityLabel: String?
+    var highlightsCount: Int?
+    var tags: [String]?
+    var highlights: [String]?
+    var todos: [String]?
+}
+
+// MARK: - Timeline Data Model
+
+struct TimelineSubClip: Identifiable {
+    let id: String
+    let timeString: String
+    let durationSeconds: TimeInterval
+    let summary: String
+    let transcriptText: String
+    let audioURL: URL?
+    let protocolURL: URL?
+    let isTrivialFragment: Bool
+}
+
 struct TimelineEntry: Identifiable {
     let id: String
     let dateString: String
     let timeString: String
-    let hourMinuteString: String
-    let hourOfDay: Int
-    let sortKey: String
     let rawTitle: String
-    let transcriptURL: URL?
+    let protocolURL: URL?
     let audioURL: URL?
-    let micAudioURL: URL?
-    let appAudioURL: URL?
-    let durationSeconds: Double
-    let transcriptText: String
-    let speakers: [String]
+    let transcriptPreview: String
+    let fullTranscriptText: String
+    let fileDate: Date
+    let durationSeconds: TimeInterval
+    let speakerNames: [String]
     let aiDigest: TimelineEntryDigest?
     let userNote: String?
+    let subClips: [TimelineSubClip]
+    let foldedFragmentCount: Int
 
-    var isVoiceMemoFocus: Bool {
-        rawTitle.contains("语音输入速记")
-            || id.contains("语音输入速记")
-            || aiDigest?.densityLabel == "当前关注"
-            || (appAudioURL == nil && durationSeconds < 120 && speakers.count <= 1)
+    var sortKey: String {
+        "\(dateString)_\(timeString)_\(id)"
     }
 
-    var displayTitle: String {
-        if let short = aiDigest?.shortTitle, !short.isEmpty {
-            return short
+    var hourMinuteString: String {
+        let parts = timeString.split(separator: ":")
+        if parts.count >= 2 {
+            return "\(parts[0]):\(parts[1])"
         }
-        return rawTitle
+        return timeString
     }
 
-    var categoryBadgeText: String {
-        if isVoiceMemoFocus {
-            return "📌 当前关注 · 主动语音速记"
+    var hourOfDay: Int {
+        let parts = timeString.split(separator: ":")
+        if let first = parts.first, let h = Int(first) {
+            return max(0, min(23, h))
         }
-        if appAudioURL != nil && micAudioURL != nil {
-            return "已记录 · \(rawTitle)"
-        }
-        return "已记录 · \(rawTitle)"
+        return Calendar.current.component(.hour, from: fileDate)
     }
 
     var formattedDurationShort: String {
         guard durationSeconds > 0 else { return "1 分钟" }
-        let total = Int(durationSeconds.rounded())
-        let mins = total / 60
-        let secs = total % 60
-        if mins >= 1 {
-            return secs >= 30 ? "\(mins + 1) 分钟" : "\(mins) 分钟"
+        let totalSec = Int(durationSeconds.rounded())
+        let mins = totalSec / 60
+        let secs = totalSec % 60
+        if mins == 0 {
+            return "\(max(1, secs)) 秒"
         }
-        return "\(max(1, secs)) 秒"
+        return "\(mins) 分钟"
     }
 
-    var formattedDurationExact: String {
-        guard durationSeconds > 0 else { return "未知时长" }
-        let total = Int(durationSeconds.rounded())
-        let mins = total / 60
-        let secs = total % 60
-        return mins > 0 ? "\(mins)分\(String(format: "%02d", secs))秒" : "\(secs)秒"
+    var nonKennySpeakers: [String] {
+        speakerNames.filter { name in
+            let lower = name.lowercased()
+            return lower != "kenny" && name != "册少" && name != "策少" && !name.hasPrefix("说话人_")
+        }
     }
 
-    var audaySummaryText: String {
-        if let s = aiDigest?.summary, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    /// True when this entry is the user's own active voice dictation / personal focus memo.
+    var isVoiceMemoFocus: Bool {
+        if rawTitle.contains("语音输入速记") || id.contains("语音输入速记") {
+            return true
+        }
+        return nonKennySpeakers.isEmpty && speakerNames.count <= 1 && !rawTitle.lowercased().contains("call")
+    }
+
+    var sourceSubtitle: String {
+        if isVoiceMemoFocus {
+            if subClips.count > 1 {
+                return "当前关注 · 语音速记 (\(subClips.count) 段聚合)"
+            }
+            return "当前关注 · 语音速记"
+        }
+        let lower = rawTitle.lowercased()
+        if lower.contains("wwmapp") || rawTitle.contains("企微") {
+            return "企微多人评审"
+        }
+        if lower.contains("tencent") || rawTitle.contains("腾讯会议") {
+            return "腾讯会议"
+        }
+        return displayTitle
+    }
+
+    var displayTitle: String {
+        if let st = aiDigest?.shortTitle, !st.isEmpty {
+            return st
+        }
+        let lower = rawTitle.lowercased()
+        if lower == "wwmapp call" || lower == "wwmapp_call" {
+            return "企业微信会议"
+        }
+        if lower == "tencent meeting call" || lower == "tencent_meeting_call" {
+            return "腾讯会议"
+        }
+        return rawTitle
+    }
+
+    /// Auday-style 2nd-person narrative summary.
+    var narrativeSummary: String {
+        if let s = aiDigest?.summary, !s.isEmpty {
             return s
         }
-        let cleanLines = transcriptText
+        let cleanLines = transcriptPreview
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && !$0.hasPrefix("#") }
         guard !cleanLines.isEmpty else {
-            return "已捕获现场录音，点击下方「AI 提炼摘要」或「Qwen3-ASR 重转」生成结构化总结。"
+            return "已捕获现场录音，点击右上角「重新提炼」或展开「Qwen3-ASR 重转」生成结构化总结。"
         }
         let bodies = cleanLines.prefix(3).map { line -> String in
             let strippedTime = line.replacingOccurrences(of: #"^\[[^\]]+\]\s*"#, with: "", options: .regularExpression)
@@ -105,7 +152,7 @@ struct TimelineEntry: Identifiable {
         }
         let joined = bodies.joined(separator: " ")
         if isVoiceMemoFocus {
-            return "你主动记录了关注重点：\(String(joined.prefix(110)))"
+            return "你梳理了当前关注重点：\(String(joined.prefix(110)))"
         }
         return String(joined.prefix(120))
     }
@@ -117,11 +164,11 @@ struct TimelineEntry: Identifiable {
         if isVoiceMemoFocus { return "当前关注" }
         if durationSeconds >= 600 { return "信息密集" }
         if durationSeconds >= 120 { return "信息适中" }
-        return "轻量速记"
+        return "信息适中"
     }
 
     var highlightsCount: Int {
-        aiDigest?.highlightsCount ?? aiDigest?.highlights?.count ?? (isVoiceMemoFocus ? 1 : 0)
+        aiDigest?.highlightsCount ?? aiDigest?.highlights?.count ?? 0
     }
 
     var highlights: [String] {
@@ -133,7 +180,7 @@ struct TimelineEntry: Identifiable {
     }
 
     var tags: [String] {
-        aiDigest?.tags ?? (isVoiceMemoFocus ? ["当前关注", "主动速记"] : [])
+        aiDigest?.tags ?? []
     }
 }
 
@@ -199,23 +246,27 @@ struct TimelineSettingsView: View {
     @State private var runningActionLabel: String = ""
     @State private var audioPlayer = TimelineAudioPlayer()
 
-    // Auday Warm Editorial Palette
+    // Auday Warm Editorial Palette (#F6F5F0 light / #141413 dark)
     private var canvasBackground: Color {
         colorScheme == .dark
-            ? Color(red: 0.10, green: 0.10, blue: 0.09)
-            : Color(red: 0.965, green: 0.961, blue: 0.941) // #F6F5F0
+            ? Color(red: 0.08, green: 0.08, blue: 0.075)
+            : Color(red: 0.965, green: 0.961, blue: 0.941)
     }
 
-    private var cardSurface: Color {
+    private var primaryInk: Color {
         colorScheme == .dark
-            ? Color(red: 0.15, green: 0.15, blue: 0.14)
-            : Color.white
+            ? Color(red: 0.94, green: 0.93, blue: 0.90)
+            : Color(red: 0.11, green: 0.12, blue: 0.11)
     }
 
-    private var focusCardSurface: Color {
+    private var secondaryInk: Color {
         colorScheme == .dark
-            ? Color(red: 0.20, green: 0.17, blue: 0.11)
-            : Color(red: 1.0, green: 0.985, blue: 0.935) // Warm Amber Ivory
+            ? Color.white.opacity(0.50)
+            : Color(red: 0.45, green: 0.45, blue: 0.43)
+    }
+
+    private var warmAccent: Color {
+        Color(red: 0.76, green: 0.48, blue: 0.18)
     }
 
     private var availableDates: [String] {
@@ -253,24 +304,23 @@ struct TimelineSettingsView: View {
             : base.sorted { $0.sortKey > $1.sortKey }
     }
 
-    private var totalRecordingMinutes: Int {
-        let sum = dateFilteredEntries.reduce(0.0) { $0 + $1.durationSeconds }
-        return max(1, Int((sum / 60.0).rounded()))
+    private var totalRecordingDurationLabel: String {
+        let totalMin = max(1, Int((dateFilteredEntries.reduce(0.0) { $0 + $1.durationSeconds } / 60.0).rounded()))
+        if totalMin >= 60 {
+            let h = totalMin / 60
+            let m = totalMin % 60
+            return m > 0 ? "\(h) 小时 \(m) 分钟" : "\(h) 小时"
+        }
+        return "\(totalMin) 分钟"
     }
 
     private var totalHighlightsCount: Int {
+        let sum = dateFilteredEntries.reduce(0) { $0 + $1.highlightsCount }
+        if sum > 0 { return sum }
         if let d = digestsByDate[activeDate], let c = d.totalHighlightsCount, c > 0 {
             return c
         }
-        return dateFilteredEntries.reduce(0) { $0 + $1.highlightsCount }
-    }
-
-    private var focusMemoCount: Int {
-        dateFilteredEntries.filter(\.isVoiceMemoFocus).count
-    }
-
-    private var meetingSessionCount: Int {
-        dateFilteredEntries.filter { !$0.isVoiceMemoFocus }.count
+        return 0
     }
 
     var body: some View {
@@ -279,7 +329,7 @@ struct TimelineSettingsView: View {
 
             ScrollViewReader { scrollProxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 24) {
                         audayTopHeader
                             .id("TIMELINE_TOP")
                         dayPillStrip
@@ -290,8 +340,8 @@ struct TimelineSettingsView: View {
                         dailyHeroReviewCard
                         timeSlotStreamSection
                     }
-                    .padding(.horizontal, 26)
-                    .padding(.vertical, 22)
+                    .padding(.horizontal, 30)
+                    .padding(.vertical, 24)
                 }
                 .onAppear {
                     reloadTimeline()
@@ -309,194 +359,197 @@ struct TimelineSettingsView: View {
         }
     }
 
-    // MARK: - 1. Top Editorial Header
+    // MARK: - 1. Top Editorial Header (Auday Screenshot 1 & 3 Layout — Narrow-Safe)
 
     private var audayTopHeader: some View {
         let parts = Self.parseDateDisplay(activeDate)
-        return HStack(alignment: .bottom, spacing: 14) {
-            Text(parts.dayNumber)
-                .font(.system(size: 46, weight: .bold, design: .serif))
-                .foregroundStyle(.primary)
+        return HStack(alignment: .center, spacing: 16) {
+            // Left Date Block: Big Serif Day + 3 Stacked Lines (never stretches horizontally)
+            HStack(alignment: .center, spacing: 14) {
+                Text(parts.dayNumber)
+                    .font(.system(size: 68, weight: .regular, design: .serif))
+                    .foregroundStyle(primaryInk)
+                    .tracking(-1.5)
+                    .fixedSize()
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(parts.weekday)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text(parts.yearMonth)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(parts.weekdayName)
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(primaryInk)
+                    Text(parts.yearMonthLabel)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(secondaryInk)
+                    HStack(spacing: 8) {
+                        Text(parts.relativeLabel)
+                        Rectangle()
+                            .fill(primaryInk.opacity(0.18))
+                            .frame(width: 24, height: 1)
+                        Text("记忆 \(totalRecordingDurationLabel)")
+                    }
                     .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondaryInk)
+                }
+                .fixedSize()
             }
-            .padding(.bottom, 5)
 
-            Text("\(parts.relativeLabel) —— 记忆 \(totalRecordingMinutes) 分钟")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-                .padding(.leading, 8)
-                .padding(.bottom, 6)
+            Spacer(minLength: 12)
 
-            Spacer()
-
+            // Right Action Cluster: Compact & Fixed-Size (never wraps or squishes on narrow widths)
             HStack(spacing: 8) {
                 Button {
                     runAgyTimelineSummarizer()
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "sparkles")
-                        Text("AI 提炼 (agy)")
-                            .fontWeight(.semibold)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("重新提炼")
+                            .font(.system(size: 12, weight: .medium))
                             .lineLimit(1)
                     }
-                    .font(.system(size: 12))
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 13)
                     .padding(.vertical, 7)
                     .background(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.12, green: 0.15, blue: 0.13),
-                                Color(red: 0.20, green: 0.26, blue: 0.22),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing,
-                        ),
-                        in: Capsule(),
+                        Capsule()
+                            .fill(primaryInk),
                     )
-                    .foregroundStyle(.white)
+                    .foregroundStyle(canvasBackground)
                 }
                 .buttonStyle(.plain)
                 .disabled(isRunningAction)
+                .fixedSize()
 
-                Button {
-                    runDailyTimelineBuilder()
-                } label: {
-                    Label("导出汇总", systemImage: "doc.richtext")
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(isRunningAction)
+                Menu {
+                    Button {
+                        NSWorkspace.shared.open(settings.effectiveOutputDir)
+                    } label: {
+                        Label("打开录音与文稿目录", systemImage: "folder")
+                    }
 
-                Button {
-                    NSWorkspace.shared.open(settings.effectiveOutputDir)
-                } label: {
-                    Label("目录", systemImage: "folder")
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
-                }
-                .buttonStyle(.plain)
+                    Button {
+                        runDailyTimelineBuilder()
+                    } label: {
+                        Label("导出 Markdown 时间线汇总", systemImage: "doc.richtext")
+                    }
 
-                Button {
-                    reloadTimeline()
+                    Divider()
+
+                    Button {
+                        selectedDate = (selectedDate == "ALL") ? Self.todayDateString() : "ALL"
+                    } label: {
+                        Label(
+                            selectedDate == "ALL" ? "仅看当天记录" : "查看全部日期 (\(entries.count))",
+                            systemImage: "calendar",
+                        )
+                    }
+
+                    Button {
+                        reloadTimeline()
+                    } label: {
+                        Label("刷新列表", systemImage: "arrow.clockwise")
+                    }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .semibold))
-                        .padding(7)
-                        .background(Color.primary.opacity(0.06), in: Circle())
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(primaryInk)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle()
+                                .strokeBorder(primaryInk.opacity(0.12), lineWidth: 1)
+                                .background(Circle().fill(primaryInk.opacity(0.04))),
+                        )
                 }
-                .buttonStyle(.plain)
-                .help("刷新时间线")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 32, height: 32)
             }
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.bottom, 4)
+            .fixedSize()
         }
     }
 
-    // MARK: - 2. 7-Day Circular Pill Selector
+    // MARK: - 2. 7-Day Circular Strip (Auday Screenshot 1 & 3 Style)
 
     private var dayPillStrip: some View {
         let stripDays = Self.buildRecentSevenDays(around: activeDate, available: Set(entries.map(\.dateString)))
-        return HStack(spacing: 12) {
+        return HStack(spacing: 0) {
             ForEach(stripDays, id: \.dateString) { item in
                 let isSelected = selectedDate != "ALL" && item.dateString == activeDate
                 Button {
                     selectedDate = item.dateString
                 } label: {
-                    VStack(spacing: 4) {
-                        Text(item.dayNumber)
-                            .font(.system(size: 15, weight: isSelected ? .bold : .medium, design: .rounded))
-                            .foregroundStyle(isSelected ? Color.white : (item.hasRecords ? Color.primary : Color.secondary.opacity(0.55)))
-                            .frame(width: 36, height: 36)
-                            .background(
-                                Circle()
-                                    .fill(isSelected ? Color(red: 0.11, green: 0.12, blue: 0.11) : Color.clear),
-                            )
-                        Circle()
-                            .fill(item.hasRecords ? (isSelected ? Color.orange : Color.primary.opacity(0.45)) : Color.clear)
-                            .frame(width: 4, height: 4)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-
-            Spacer()
-
-            Button {
-                selectedDate = (selectedDate == "ALL") ? Self.todayDateString() : "ALL"
-            } label: {
-                Text(selectedDate == "ALL" ? "仅看当天" : "全部日期 (\(entries.count))")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(selectedDate == "ALL" ? Color.white : Color.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule()
-                            .fill(selectedDate == "ALL" ? Color.accentColor : Color.primary.opacity(0.06)),
-                    )
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    // MARK: - 3. 24-Hour Activity Density Bar Chart
-
-    private var hourlyDensityChart: some View {
-        let buckets = computeHourlyBuckets()
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .bottom, spacing: 6) {
-                ForEach(0 ..< 24, id: \.self) { hour in
-                    let info = buckets[hour]
-                    VStack(spacing: 4) {
-                        ZStack(alignment: .bottom) {
-                            Capsule()
-                                .fill(Color.primary.opacity(0.07))
-                                .frame(width: 6, height: 28)
-                            if info.minutes > 0 {
-                                let ratio = min(1.0, max(0.22, info.minutes / 30.0))
-                                Capsule()
-                                    .fill(
-                                        info.hasFocusMemo && info.minutes < 5
-                                            ? Color.orange
-                                            : Color(red: 0.14, green: 0.17, blue: 0.15),
-                                    )
-                                    .frame(width: 6, height: CGFloat(28.0 * ratio))
-                            }
+                    ZStack {
+                        if isSelected {
+                            Circle()
+                                .fill(primaryInk)
+                                .frame(width: 42, height: 42)
+                        }
+                        VStack(spacing: 3) {
+                            Text(item.dayNumber)
+                                .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
+                                .foregroundStyle(
+                                    isSelected
+                                        ? canvasBackground
+                                        : (item.hasRecords ? primaryInk : secondaryInk.opacity(0.55)),
+                                )
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(
+                                    item.hasRecords
+                                        ? (isSelected ? canvasBackground.opacity(0.85) : primaryInk.opacity(0.55))
+                                        : Color.clear,
+                                )
+                                .frame(width: 8, height: 1.6)
                         }
                     }
                     .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .contentShape(Rectangle())
                 }
-            }
-            .frame(height: 30)
-
-            HStack {
-                Text("00").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-                Spacer()
-                Text("06").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-                Spacer()
-                Text("12").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-                Spacer()
-                Text("18").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-                Spacer()
-                Text("24").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 4)
     }
 
-    // MARK: - 4. Live Activity & Status Banner (Auday Screenshot 4 Style)
+    // MARK: - 3. 24-Hour Activity Density Bar Chart (Auday Baseline Dash -> Dark Block Style)
+
+    private var hourlyDensityChart: some View {
+        let buckets = computeHourlyBuckets()
+        let maxMinutes = max(15.0, buckets.map(\.minutes).max() ?? 15.0)
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .bottom, spacing: 5) {
+                ForEach(0 ..< 24, id: \.self) { hour in
+                    let mins = buckets[hour].minutes
+                    let isActive = mins > 0
+                    let ratio = min(1.0, max(0.24, mins / maxMinutes))
+                    let barHeight: CGFloat = isActive ? CGFloat(6.0 + 20.0 * ratio) : 3.5
+
+                    RoundedRectangle(cornerRadius: isActive ? 3.0 : 1.75)
+                        .fill(
+                            isActive
+                                ? primaryInk.opacity(0.82)
+                                : primaryInk.opacity(0.10),
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: barHeight)
+                }
+            }
+            .frame(height: 28, alignment: .bottom)
+
+            HStack {
+                Text("00")
+                Spacer()
+                Text("06")
+                Spacer()
+                Text("12")
+                Spacer()
+                Text("18")
+                Spacer()
+                Text("24")
+            }
+            .font(.system(size: 10.5, weight: .regular, design: .monospaced))
+            .foregroundStyle(secondaryInk.opacity(0.8))
+        }
+    }
+
+    // MARK: - 4. Live Activity Banner (Auday Screenshot 3 Style)
 
     private var liveActivityBanner: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -506,210 +559,198 @@ struct TimelineSettingsView: View {
                         .controlSize(.small)
                 } else {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.green)
+                        .foregroundStyle(Color(red: 0.32, green: 0.65, blue: 0.40))
                 }
                 Text(isRunningAction ? runningActionLabel : (statusBanner ?? ""))
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(primaryInk)
                 Spacer()
                 if !isRunningAction {
-                    Button("知道了") {
+                    Button("收起") {
                         statusBanner = nil
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(secondaryInk)
                 }
             }
             if isRunningAction {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(Color.primary.opacity(0.08))
-                            .frame(height: 5)
+                            .fill(primaryInk.opacity(0.08))
+                            .frame(height: 4)
                         Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.orange, Color.green],
-                                    startPoint: .leading,
-                                    endPoint: .trailing,
-                                ),
-                            )
-                            .frame(width: geo.size.width * 0.65, height: 5)
+                            .fill(primaryInk.opacity(0.75))
+                            .frame(width: geo.size.width * 0.45, height: 4)
                     }
                 }
-                .frame(height: 5)
+                .frame(height: 4)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(colorScheme == .dark ? Color.white.opacity(0.07) : Color(red: 0.93, green: 0.92, blue: 0.89)),
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(primaryInk.opacity(0.045)),
         )
     }
 
-    // MARK: - 5. Dark Hero "每日回顾" Card (Auday Screenshot 2 & 3 Style)
+    // MARK: - 5. Dark Hero "每日回顾" Card (Auday Screenshot 1 Botanical Dot-Matrix Style)
 
     private var dailyHeroReviewCard: some View {
         let digest = digestsByDate[activeDate]
-        let quote = digest?.dailyQuote ?? "把复杂的事拆小，才看得见路。"
+        let rawQuote = digest?.dailyQuote ?? "把复杂的事拆小，才看得见路。"
+        let quote = rawQuote.trimmingCharacters(in: CharacterSet(charactersIn: "“”\"'「」 "))
         let overview = digest?.dailyOverview
-            ?? "已归档 \(filteredEntries.count) 段今日会议与语音速记，点击右上角「AI 提炼」即可由 agy Gemini 4 High 生成全天洞察与时段摘要。"
+            ?? "已归档今日 \(dateFilteredEntries.count) 个时段的会议讨论与个人业务关注速记。"
 
-        return ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.07, green: 0.08, blue: 0.07),
-                            Color(red: 0.12, green: 0.14, blue: 0.12),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing,
-                    ),
-                )
+        return VStack(alignment: .leading, spacing: 0) {
+            // Top Stippled Botanical Leaf Dot-Matrix Art (Auday Screenshot 1)
+            botanicalDotMatrixCanvas
+                .frame(height: 116)
+                .frame(maxWidth: .infinity)
+                .clipped()
 
-            // Dot-matrix botanical/waveform illustration (Auday signature art)
-            dotMatrixHeroArt
-                .frame(width: 190, height: 150)
-                .opacity(0.85)
-                .allowsHitTesting(false)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("每日回顾")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.46))
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 6) {
-                    Text("每日回顾")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.75))
-                    if let model = digest?.model {
-                        Text("· \(model)")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color.green.opacity(0.85))
-                    }
-                    Spacer()
-                }
-
-                Text("“\(quote)”")
-                    .font(.system(size: 21, weight: .bold, design: .serif))
-                    .foregroundStyle(Color.white)
-                    .padding(.trailing, 120)
+                Text(quote)
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(0.96))
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text(overview)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.white.opacity(0.78))
-                    .lineSpacing(4)
-                    .padding(.trailing, 40)
+                    .font(.system(size: 13.5, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(0.66))
+                    .lineSpacing(4.5)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 14) {
-                    Label("已录音 \(totalRecordingMinutes) 分钟", systemImage: "waveform")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.65))
-
-                    Label("\(totalHighlightsCount) 个重点", systemImage: "sparkle")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(red: 0.98, green: 0.80, blue: 0.32))
-
-                    if focusMemoCount > 0 {
-                        Label("\(focusMemoCount) 条个人当前关注", systemImage: "pin.fill")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color(red: 1.0, green: 0.64, blue: 0.26))
-                    }
+                HStack(alignment: .center) {
+                    Text("已录音 \(totalRecordingDurationLabel)  ·  \(totalHighlightsCount) 个重点")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(Color.white.opacity(0.45))
 
                     Spacer()
 
                     Button {
-                        runAgyTimelineSummarizer()
+                        openOrRefreshDailyMarkdown()
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                            Text("刷新回顾")
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.9))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.14), in: Capsule())
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(0.68))
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(isRunningAction)
+                    .help("打开每日回顾 Markdown 文稿")
                 }
-                .padding(.top, 4)
+                .padding(.top, 6)
             }
-            .padding(22)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 22)
         }
-        .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 6)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color(red: 0.055, green: 0.063, blue: 0.055)),
+        )
     }
 
-    private var dotMatrixHeroArt: some View {
+    /// Stippled dot-matrix botanical branch inspired by Auday Screenshot 1.
+    private var botanicalDotMatrixCanvas: some View {
         Canvas { context, size in
-            let cols = 16
-            let rows = 12
-            let spacingX = size.width / CGFloat(cols + 2)
-            let spacingY = size.height / CGFloat(rows + 2)
-            let center = CGPoint(x: size.width * 0.58, y: size.height * 0.48)
+            let spacing: CGFloat = 4.6
+            let cols = Int(size.width / spacing)
+            let rows = Int(size.height / spacing)
+            let centerX = size.width * 0.48
+
+            // Four organic tilted elliptical leaf shapes + stem
+            struct LeafShape {
+                let cx: CGFloat
+                let cy: CGFloat
+                let rx: CGFloat
+                let ry: CGFloat
+                let angle: CGFloat
+            }
+
+            let leaves: [LeafShape] = [
+                LeafShape(cx: centerX - 68, cy: 78, rx: 34, ry: 13, angle: -0.58),
+                LeafShape(cx: centerX - 24, cy: 40, rx: 42, ry: 16, angle: -0.82),
+                LeafShape(cx: centerX + 34, cy: 36, rx: 46, ry: 15, angle: 0.62),
+                LeafShape(cx: centerX + 22, cy: 76, rx: 44, ry: 14, angle: 0.22),
+                LeafShape(cx: centerX + 74, cy: 52, rx: 36, ry: 12, angle: -0.25),
+            ]
 
             for r in 0 ..< rows {
                 for c in 0 ..< cols {
-                    let x = CGFloat(c + 1) * spacingX
-                    let y = CGFloat(r + 1) * spacingY
-                    let dx = (x - center.x) / (size.width * 0.42)
-                    let dy = (y - center.y) / (size.height * 0.42)
-                    let dist = sqrt(dx * dx + dy * dy)
-                    let angle = atan2(dy, dx)
-                    let petal = 0.55 + 0.32 * cos(angle * 5.0)
-                    if dist < petal {
-                        let dotRadius: CGFloat = dist < 0.22 ? 2.4 : (dist < petal * 0.75 ? 2.0 : 1.3)
-                        let color: Color = if dist < 0.20 {
-                            Color(red: 0.96, green: 0.78, blue: 0.30)
-                        } else if (r + c).isMultiple(of: 3) {
-                            Color(red: 0.36, green: 0.82, blue: 0.54).opacity(0.75)
-                        } else {
-                            Color.white.opacity(max(0.18, 0.72 - dist * 0.5))
+                    let x = CGFloat(c) * spacing
+                    let y = CGFloat(r) * spacing
+                    var maxIntensity: CGFloat = 0
+
+                    for leaf in leaves {
+                        let dx = x - leaf.cx
+                        let dy = y - leaf.cy
+                        let cosA = cos(leaf.angle)
+                        let sinA = sin(leaf.angle)
+                        let lx = dx * cosA + dy * sinA
+                        let ly = -dx * sinA + dy * cosA
+                        let norm = (lx * lx) / (leaf.rx * leaf.rx) + (ly * ly) / (leaf.ry * leaf.ry)
+                        if norm <= 1.0 {
+                            let edgeFade = 1.0 - pow(norm, 0.75)
+                            // Subtle central vein modulation
+                            let vein = abs(ly) < 1.8 ? 0.35 : 1.0
+                            maxIntensity = max(maxIntensity, edgeFade * vein)
                         }
-                        let rect = CGRect(
-                            x: x - dotRadius,
-                            y: y - dotRadius,
-                            width: dotRadius * 2,
-                            height: dotRadius * 2,
-                        )
-                        context.fill(Path(ellipseIn: rect), with: .color(color))
                     }
+
+                    guard maxIntensity > 0.08 else { continue }
+                    let dotDiameter: CGFloat = maxIntensity > 0.55 ? 2.7 : 2.1
+                    let dotColor: Color = if maxIntensity > 0.68 {
+                        Color(red: 0.82, green: 0.89, blue: 0.64).opacity(0.92)
+                    } else if maxIntensity > 0.38 {
+                        Color(red: 0.54, green: 0.76, blue: 0.53).opacity(0.82)
+                    } else {
+                        Color(red: 0.28, green: 0.48, blue: 0.32).opacity(0.65)
+                    }
+
+                    let rect = CGRect(
+                        x: x - dotDiameter / 2,
+                        y: y - dotDiameter / 2,
+                        width: dotDiameter,
+                        height: dotDiameter,
+                    )
+                    context.fill(Path(ellipseIn: rect), with: .color(dotColor))
                 }
             }
         }
     }
 
-    // MARK: - 6. "当日时段" Time-Slot Stream
+    // MARK: - 6. "当日时段" Editorial Time-Slot Stream (Auday Screenshot 2 & 3 Style)
 
     private var timeSlotStreamSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 10) {
                 Text("当日时段")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(primaryInk)
 
                 HStack(spacing: 6) {
-                    filterChip(title: "全部 (\(dateFilteredEntries.count))", key: "ALL", tint: .primary)
-                    filterChip(title: "👥 会议评审 (\(meetingSessionCount))", key: "MEETING", tint: .indigo)
-                    filterChip(title: "📌 个人关注 (\(focusMemoCount))", key: "VOICE_MEMO", tint: .orange)
+                    filterChip(title: "全部", key: "ALL")
+                    filterChip(title: "多人会议", key: "MEETING")
+                    filterChip(title: "当前关注", key: "VOICE_MEMO")
                 }
-                .padding(.leading, 6)
+                .padding(.leading, 4)
 
                 Spacer()
 
                 Button {
                     sortChronological.toggle()
                 } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: sortChronological ? "arrow.up.right" : "arrow.down.right")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text(sortChronological ? "按时间正序" : "最新优先")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(Color.primary.opacity(0.06), in: Capsule())
+                    Text("\(filteredEntries.count) 个时段 · \(sortChronological ? "正序" : "最新")")
+                        .font(.system(size: 12.5, weight: .regular))
+                        .foregroundStyle(secondaryInk)
                 }
                 .buttonStyle(.plain)
             }
@@ -726,19 +767,19 @@ struct TimelineSettingsView: View {
         }
     }
 
-    private func filterChip(title: String, key: String, tint: Color) -> some View {
+    private func filterChip(title: String, key: String) -> some View {
         let isSelected = categoryFilter == key
         return Button {
             categoryFilter = key
         } label: {
             Text(title)
-                .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                .foregroundStyle(isSelected ? Color.white : tint.opacity(0.85))
-                .padding(.horizontal, 9)
+                .font(.system(size: 11.5, weight: isSelected ? .medium : .regular))
+                .foregroundStyle(isSelected ? canvasBackground : secondaryInk)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(
                     Capsule()
-                        .fill(isSelected ? (key == "ALL" ? Color(red: 0.16, green: 0.17, blue: 0.16) : tint) : tint.opacity(0.09)),
+                        .fill(isSelected ? primaryInk : primaryInk.opacity(0.06)),
                 )
         }
         .buttonStyle(.plain)
@@ -747,416 +788,420 @@ struct TimelineSettingsView: View {
     private var emptyStateView: some View {
         VStack(spacing: 10) {
             Image(systemName: "waveform.badge.clock")
-                .font(.system(size: 32))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 28))
+                .foregroundStyle(secondaryInk)
             Text("该日期暂无录音与时间线归档")
-                .font(.system(size: 15, weight: .semibold))
-            Text("进入企微/腾讯会议或使用 DJI Mic 语音输入时，系统将静默收音并通过 Qwen3-ASR 与 agy Gemini 4 High 自动生成时段摘要。")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(primaryInk)
+            Text("进入企微/腾讯会议或使用麦克风语音输入时，系统将静默收音并自动提炼时段摘要。")
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(secondaryInk)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 440)
+                .frame(maxWidth: 420)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 44)
-        .background(cardSurface, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.vertical, 40)
     }
 
+    /// Clean, unboxed Auday editorial row (`14:00` + hollow circle + hairline on left; narrative + subtle meta on right).
     private func audayTimelineRow(entry: TimelineEntry, isLast: Bool) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            // Left Time Axis (Auday Screenshot 2 & 3 style)
-            VStack(spacing: 6) {
-                Text(entry.hourMinuteString)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(entry.isVoiceMemoFocus ? Color.orange : Color.secondary)
-
-                ZStack {
-                    Circle()
-                        .stroke(
-                            entry.isVoiceMemoFocus ? Color.orange : Color.primary.opacity(0.35),
-                            lineWidth: 1.8,
-                        )
-                        .frame(width: 9, height: 9)
-                    if entry.isVoiceMemoFocus {
-                        Circle()
-                            .fill(Color.orange)
-                            .frame(width: 4.5, height: 4.5)
-                    }
-                }
-
-                if !isLast {
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.10))
-                        .frame(width: 1.5)
-                        .frame(maxHeight: .infinity)
-                }
-            }
-            .frame(width: 52)
-            .padding(.top, 14)
-
-            // Right Editorial Session Card
-            audaySessionCard(entry)
-                .padding(.bottom, 16)
-        }
-    }
-
-    private func audaySessionCard(_ entry: TimelineEntry) -> some View {
         let isExpanded = expandedIDs.contains(entry.id)
         let isEditingThisNote = editingNoteID == entry.id
 
-        return VStack(alignment: .leading, spacing: 11) {
-            sessionCardHeader(entry)
-            sessionCardSummary(entry)
-            if let note = entry.userNote, !note.isEmpty, !isEditingThisNote {
-                sessionCardNoteBanner(entry: entry, note: note)
+        return HStack(alignment: .top, spacing: 18) {
+            // Left Time Axis (Auday Screenshot 2: "14:00" + small hollow circle + vertical line)
+            VStack(spacing: 8) {
+                Text(entry.hourMinuteString)
+                    .font(.system(size: 13.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(primaryInk)
+
+                Circle()
+                    .stroke(
+                        entry.isVoiceMemoFocus ? warmAccent : primaryInk.opacity(0.40),
+                        lineWidth: 1.3,
+                    )
+                    .frame(width: 6.5, height: 6.5)
+
+                if !isLast {
+                    Rectangle()
+                        .fill(primaryInk.opacity(0.09))
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                }
             }
-            if isEditingThisNote {
-                sessionCardNoteEditor(entry)
+            .frame(width: 48)
+            .padding(.top, 2)
+
+            // Right Editorial Content Column (No noisy box borders — pure typography + bottom divider)
+            VStack(alignment: .leading, spacing: 10) {
+                // Row 1: "已记录 · 企微多人评审" ... "26 分钟"
+                HStack(alignment: .center, spacing: 6) {
+                    Text("已记录")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(secondaryInk)
+
+                    Text("·")
+                        .font(.system(size: 12))
+                        .foregroundStyle(secondaryInk.opacity(0.6))
+
+                    Text(entry.sourceSubtitle)
+                        .font(.system(size: 12, weight: entry.isVoiceMemoFocus ? .medium : .regular))
+                        .foregroundStyle(entry.isVoiceMemoFocus ? warmAccent : secondaryInk)
+
+                    Spacer()
+
+                    Text(entry.formattedDurationShort)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(secondaryInk)
+                }
+
+                // Row 2: Main Editorial Narrative Paragraph
+                Text(entry.narrativeSummary)
+                    .font(.system(size: 15.5, weight: .regular))
+                    .foregroundStyle(primaryInk.opacity(0.92))
+                    .lineSpacing(5.5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        toggleExpand(entry.id)
+                    }
+
+                // Optional User Custom Remark Banner
+                if let note = entry.userNote, !note.isEmpty, !isEditingThisNote {
+                    sessionCardNoteBanner(entry: entry, note: note)
+                }
+                if isEditingThisNote {
+                    sessionCardNoteEditor(entry)
+                }
+
+                // Row 3: Subtle Metadata ("信息密集 · ✦ 6 个重点") + Right Actions ("备注" + "↗")
+                sessionCardFooter(entry: entry, isExpanded: isExpanded)
+                    .padding(.top, 2)
+
+                // Expandable Detail Drawer
+                if isExpanded {
+                    expandedDrawerView(entry)
+                        .padding(.top, 6)
+                }
+
+                // Bottom Hairline Divider (Auday Screenshot 2)
+                Rectangle()
+                    .fill(primaryInk.opacity(0.08))
+                    .frame(height: 1)
+                    .padding(.top, 14)
             }
-            sessionCardFooter(entry: entry, isExpanded: isExpanded)
-            if isExpanded {
-                Divider().padding(.vertical, 2)
-                expandedDrawerView(entry)
-            }
+            .padding(.bottom, 18)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(sessionCardBackground(entry))
-        .overlay(sessionCardBorder(entry))
-        .shadow(color: Color.black.opacity(0.03), radius: 6, x: 0, y: 2)
-    }
-
-    private func sessionCardBackground(_ entry: TimelineEntry) -> some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(entry.isVoiceMemoFocus ? focusCardSurface : cardSurface)
-    }
-
-    private func sessionCardBorder(_ entry: TimelineEntry) -> some View {
-        let strokeColor = entry.isVoiceMemoFocus ? Color.orange.opacity(0.32) : Color.primary.opacity(0.07)
-        let width: CGFloat = entry.isVoiceMemoFocus ? 1.4 : 1.0
-        return RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .stroke(strokeColor, lineWidth: width)
-    }
-
-    private func sessionCardHeader(_ entry: TimelineEntry) -> some View {
-        let badgeTint: Color = entry.isVoiceMemoFocus ? .orange : .indigo
-        return HStack(alignment: .center, spacing: 8) {
-            Text(entry.categoryBadgeText)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(badgeTint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(badgeTint.opacity(0.12), in: Capsule())
-
-            if !entry.isVoiceMemoFocus {
-                Text(entry.displayTitle)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary.opacity(0.85))
-            }
-
-            Spacer()
-
-            Text(entry.formattedDurationShort)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func sessionCardSummary(_ entry: TimelineEntry) -> some View {
-        Text(entry.audaySummaryText)
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(.primary)
-            .lineSpacing(5)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func sessionCardNoteBanner(entry: TimelineEntry, note: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "note.text")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.green)
+            Image(systemName: "pin.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(warmAccent)
                 .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("我的备注 / 重点补充")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.green)
-                Text(note)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-            }
+            Text("备注：\(note)")
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(primaryInk.opacity(0.88))
             Spacer()
-            Button("修改") {
+            Button("编辑") {
                 editingNoteID = entry.id
                 noteDraft = note
             }
             .buttonStyle(.plain)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
+            .font(.system(size: 11.5))
+            .foregroundStyle(secondaryInk)
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.green.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.green.opacity(0.25), lineWidth: 1),
-                ),
-        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(primaryInk.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func sessionCardNoteEditor(_ entry: TimelineEntry) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("📌 为该时段添加备注或重点说明（将持久保存并供 Agent 总结参考）：")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            TextField("输入你的备注、结论修正或重点关注事项...", text: $noteDraft, axis: .vertical)
+        HStack(spacing: 8) {
+            TextField("输入这段录音的重点备注或跟进结论...", text: $noteDraft)
                 .textFieldStyle(.roundedBorder)
-                .lineLimit(2 ... 5)
-            HStack(spacing: 8) {
-                Button("保存备注") {
-                    saveUserNote(for: entry.id, text: noteDraft)
-                    editingNoteID = nil
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-
-                Button("取消") {
-                    editingNoteID = nil
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                if entry.userNote != nil {
-                    Button("清空") {
-                        saveUserNote(for: entry.id, text: "")
-                        editingNoteID = nil
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.red)
-                    .controlSize(.small)
-                }
+                .font(.system(size: 12))
+            Button("保存") {
+                saveUserNote(for: entry.id, text: noteDraft)
+                editingNoteID = nil
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            Button("取消") {
+                editingNoteID = nil
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
-        .padding(10)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func sessionCardFooter(entry: TimelineEntry, isExpanded: Bool) -> some View {
-        let accentColor: Color = entry.isVoiceMemoFocus ? .orange : .indigo
-        let dColor = densityColor(entry.densityLabel)
-        return HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Text(entry.densityLabel)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(dColor)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .background(dColor.opacity(0.12), in: Capsule())
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(secondaryInk)
 
-            sessionCardMetadataPills(entry)
+            if entry.highlightsCount > 0 {
+                Text("·")
+                    .font(.system(size: 12))
+                    .foregroundStyle(secondaryInk.opacity(0.6))
+                HStack(spacing: 3) {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(warmAccent)
+                    Text("\(entry.highlightsCount) 个重点")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(secondaryInk)
+                }
+            }
+
+            if !entry.todos.isEmpty {
+                Text("·")
+                    .font(.system(size: 12))
+                    .foregroundStyle(secondaryInk.opacity(0.6))
+                Text("\(entry.todos.count) 项待办")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(secondaryInk)
+            }
+
+            if !entry.nonKennySpeakers.isEmpty {
+                Text("·")
+                    .font(.system(size: 12))
+                    .foregroundStyle(secondaryInk.opacity(0.6))
+                Text(entry.nonKennySpeakers.prefix(4).joined(separator: "、"))
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(secondaryInk)
+                    .lineLimit(1)
+            }
+
+            if entry.foldedFragmentCount > 0 {
+                Text("· 已过滤 \(entry.foldedFragmentCount) 条碎片输入")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(secondaryInk.opacity(0.75))
+            }
 
             Spacer()
 
             Button {
-                if editingNoteID == entry.id {
-                    editingNoteID = nil
-                } else {
-                    editingNoteID = entry.id
-                    noteDraft = entry.userNote ?? ""
-                }
+                editingNoteID = entry.id
+                noteDraft = entry.userNote ?? ""
             } label: {
-                Label(entry.userNote == nil ? "备注" : "改备注", systemImage: "square.and.pencil")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                Text("备注")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(secondaryInk)
             }
             .buttonStyle(.plain)
 
             Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    if isExpanded {
-                        expandedIDs.remove(entry.id)
-                    } else {
-                        expandedIDs.insert(entry.id)
-                    }
-                }
+                toggleExpand(entry.id)
             } label: {
-                HStack(spacing: 3) {
-                    Text(isExpanded ? "收起详情" : "重点与逐字稿")
-                    Image(systemName: isExpanded ? "chevron.up" : "arrow.up.right")
-                }
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(accentColor)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(accentColor.opacity(0.10), in: Capsule())
+                Image(systemName: isExpanded ? "chevron.up" : "arrow.up.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(secondaryInk)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
     }
 
-    @ViewBuilder
-    private func sessionCardMetadataPills(_ entry: TimelineEntry) -> some View {
-        if !entry.speakers.isEmpty {
-            let spkText = entry.speakers.count <= 3
-                ? entry.speakers.joined(separator: "、")
-                : "\(entry.speakers.prefix(3).joined(separator: "、")) 等\(entry.speakers.count)人"
-            Label(spkText, systemImage: "person.2")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-
-        if entry.highlightsCount > 0 {
-            HStack(spacing: 3) {
-                Image(systemName: "sparkle")
-                Text("\(entry.highlightsCount) 个重点")
+    private func toggleExpand(_ id: String) {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            if expandedIDs.contains(id) {
+                expandedIDs.remove(id)
+            } else {
+                expandedIDs.insert(id)
             }
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(Color(red: 0.82, green: 0.48, blue: 0.04))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(Color.yellow.opacity(0.18), in: Capsule())
-        }
-
-        if !entry.todos.isEmpty {
-            HStack(spacing: 3) {
-                Image(systemName: "checklist")
-                Text("\(entry.todos.count) 项待办")
-            }
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(Color.red)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(Color.red.opacity(0.10), in: Capsule())
-        }
-
-        ForEach(entry.tags.prefix(3), id: \.self) { tag in
-            Text("#\(tag)")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
         }
     }
 
-    @ViewBuilder
+    // MARK: - 7. Expanded Detail Drawer
+
     private func expandedDrawerView(_ entry: TimelineEntry) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // 1. Structured Highlights
+        VStack(alignment: .leading, spacing: 14) {
             if !entry.highlights.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("✦ 核心重点结论")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color(red: 0.80, green: 0.45, blue: 0.02))
-                    ForEach(entry.highlights, id: \.self) { hl in
-                        HStack(alignment: .top, spacing: 6) {
-                            Text("•")
-                                .fontWeight(.bold)
-                                .foregroundStyle(Color.orange)
-                            Text(hl)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.primary)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                expandedHighlightsSection(entry)
             }
-
-            // 2. Actionable Todos
             if !entry.todos.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("☑ 双向待办与承诺")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.red)
-                    ForEach(entry.todos, id: \.self) { td in
-                        let isMine = td.contains("我方") || td.contains("Kenny")
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: isMine ? "person.crop.circle.badge.exclamationmark" : "arrow.turn.down.right")
-                                .font(.system(size: 11))
-                                .foregroundStyle(isMine ? Color.red : Color.blue)
-                                .padding(.top, 2)
-                            Text(td)
-                                .font(.system(size: 12, weight: isMine ? .semibold : .regular))
-                                .foregroundStyle(.primary)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.red.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+                expandedTodosSection(entry)
             }
+            if entry.subClips.count > 1 {
+                expandedSubClipsSection(entry)
+            }
+            expandedActionsToolbar(entry)
+            expandedRawTranscriptBox(entry)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(primaryInk.opacity(0.035)),
+        )
+    }
 
-            // 3. Audio Controls & Action Bar
-            HStack(spacing: 8) {
-                if let audioURL = entry.audioURL {
-                    let playingThis = audioPlayer.playingEntryID == entry.id && audioPlayer.isPlaying
-                    Button {
-                        audioPlayer.togglePlay(entryID: entry.id, url: audioURL)
-                    } label: {
-                        Label(
-                            playingThis ? "停止播放 (\(entry.formattedDurationExact))" : "播放录音 (\(entry.formattedDurationExact))",
-                            systemImage: playingThis ? "stop.fill" : "play.fill",
-                        )
-                    }
-                    .controlSize(.small)
+    private func expandedHighlightsSection(_ entry: TimelineEntry) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("✦ 核心重点结论")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(warmAccent)
 
-                    Button("定位音频") {
-                        NSWorkspace.shared.activateFileViewerSelecting([audioURL])
-                    }
-                    .controlSize(.small)
-
-                    Button("Qwen3-ASR 重转") {
-                        retranscribeWithQwen(audioURL: audioURL, entry: entry)
-                    }
-                    .controlSize(.small)
-                    .disabled(isRunningAction)
+            ForEach(entry.highlights, id: \.self) { hl in
+                HStack(alignment: .top, spacing: 8) {
+                    Circle()
+                        .fill(warmAccent.opacity(0.75))
+                        .frame(width: 4.5, height: 4.5)
+                        .padding(.top, 6)
+                    Text(hl)
+                        .font(.system(size: 13))
+                        .foregroundStyle(primaryInk.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+        }
+    }
 
-                if let txtURL = entry.transcriptURL {
-                    Button("打开逐字稿文件") {
-                        NSWorkspace.shared.open(txtURL)
+    private func expandedTodosSection(_ entry: TimelineEntry) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("☑ 双向待办与承诺")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(primaryInk.opacity(0.75))
+
+            ForEach(entry.todos, id: \.self) { td in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "square")
+                        .font(.system(size: 11))
+                        .foregroundStyle(secondaryInk)
+                        .padding(.top, 2)
+                    Text(td)
+                        .font(.system(size: 13))
+                        .foregroundStyle(primaryInk.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func expandedSubClipsSection(_ entry: TimelineEntry) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("包含 \(entry.subClips.count) 段连续语音记录")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(secondaryInk)
+
+            ForEach(entry.subClips) { clip in
+                HStack(alignment: .center, spacing: 8) {
+                    Text(clip.timeString)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(secondaryInk)
+                    Text(clip.summary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(clip.isTrivialFragment ? secondaryInk : primaryInk.opacity(0.85))
+                        .lineLimit(1)
+                    Spacer()
+                    if let url = clip.audioURL {
+                        Button {
+                            audioPlayer.togglePlay(entryID: clip.id, url: url)
+                        } label: {
+                            Image(
+                                systemName: (audioPlayer.playingEntryID == clip.id && audioPlayer.isPlaying)
+                                    ? "stop.circle.fill"
+                                    : "play.circle",
+                            )
+                            .font(.system(size: 13))
+                            .foregroundStyle(secondaryInk)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .controlSize(.small)
                 }
+            }
+        }
+    }
 
-                Button("单条 AI 重提炼") {
-                    runAgyTimelineSummarizer(singleSlug: entry.id)
+    private func expandedActionsToolbar(_ entry: TimelineEntry) -> some View {
+        HStack(spacing: 10) {
+            if let audioURL = entry.audioURL {
+                let isPlayingThis = audioPlayer.playingEntryID == entry.id && audioPlayer.isPlaying
+                Button {
+                    audioPlayer.togglePlay(entryID: entry.id, url: audioURL)
+                } label: {
+                    Label(isPlayingThis ? "停止播放" : "播放原声", systemImage: isPlayingThis ? "stop.fill" : "play.fill")
+                        .font(.system(size: 11.5, weight: .medium))
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([audioURL])
+                } label: {
+                    Label("定位音频", systemImage: "waveform")
+                        .font(.system(size: 11.5))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
+                    retranscribeWithQwen(audioURL: audioURL, entry: entry)
+                } label: {
+                    Label("Qwen3-ASR 重转", systemImage: "sparkles")
+                        .font(.system(size: 11.5))
+                }
+                .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(isRunningAction)
-
-                Spacer()
             }
 
-            // 4. Raw Transcript Box
-            if !entry.transcriptText.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("📝 原始逐字稿 (\(entry.id))")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    ScrollView {
-                        Text(entry.transcriptText)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.primary.opacity(0.9))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                    }
-                    .frame(maxHeight: 240)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+            if let protocolURL = entry.protocolURL {
+                Button {
+                    NSWorkspace.shared.open(protocolURL)
+                } label: {
+                    Label("打开文稿", systemImage: "doc.text")
+                        .font(.system(size: 11.5))
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
+
+            Spacer()
+
+            Button {
+                let copyText = """
+                【\(entry.displayTitle)】(\(entry.dateString) \(entry.hourMinuteString))
+                摘要：\(entry.narrativeSummary)
+                重点：
+                \(entry.highlights.map { "- \($0)" }.joined(separator: "\n"))
+
+                原始逐字稿：
+                \(entry.fullTranscriptText)
+                """
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(copyText, forType: .string)
+                statusBanner = "已复制「\(entry.displayTitle)」摘要与逐字稿"
+            } label: {
+                Label("复制全文", systemImage: "doc.on.doc")
+                    .font(.system(size: 11.5))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 
-    private func densityColor(_ label: String) -> Color {
-        switch label {
-        case "信息密集": Color.indigo
-        case "当前关注": Color.orange
-        case "信息适中": Color.teal
-        default: Color.secondary
+    private func expandedRawTranscriptBox(_ entry: TimelineEntry) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("原始逐字稿")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(secondaryInk)
+            ScrollView {
+                Text(entry.fullTranscriptText.isEmpty ? "（暂无转写内容）" : entry.fullTranscriptText)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(primaryInk.opacity(0.82))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .frame(minHeight: 90, maxHeight: 200)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(primaryInk.opacity(0.03)),
+            )
         }
     }
 
@@ -1171,7 +1216,7 @@ struct TimelineSettingsView: View {
         var buckets = Array(repeating: HourBucket(), count: 24)
         for entry in dateFilteredEntries {
             let h = max(0, min(23, entry.hourOfDay))
-            let mins = max(0.8, entry.durationSeconds / 60.0)
+            let mins = max(1.0, entry.durationSeconds / 60.0)
             buckets[h].minutes += mins
             if entry.isVoiceMemoFocus {
                 buckets[h].hasFocusMemo = true
@@ -1193,7 +1238,7 @@ struct TimelineSettingsView: View {
         userNotes = loadedNotes
         entries = TimelineScanner.scan(
             outputDir: outDir,
-            stagingDir: AppPaths.recordingsDir,
+            recordingsDir: AppPaths.recordingsDir,
             digestsByDate: loadedDigests,
             userNotes: loadedNotes,
         )
@@ -1209,16 +1254,26 @@ struct TimelineSettingsView: View {
         } else {
             userNotes[entryID] = trimmed
         }
-        let outDir = settings.effectiveOutputDir
-        TimelineScanner.saveUserNotes(userNotes, outputDir: outDir)
+        TimelineScanner.saveUserNotes(userNotes, outputDir: settings.effectiveOutputDir)
         reloadTimeline()
+        statusBanner = "已保存备注"
     }
 
+    private func openOrRefreshDailyMarkdown() {
+        let mdURL = settings.effectiveOutputDir
+            .appendingPathComponent("daily_timelines", isDirectory: true)
+            .appendingPathComponent("\(activeDate)_ai_digest.md")
+        if FileManager.default.fileExists(atPath: mdURL.path) {
+            NSWorkspace.shared.open(mdURL)
+        } else {
+            runAgyTimelineSummarizer()
+        }
+    }
+
+    /// Background execution of `summarize_timeline_agy.py`.
     private func runAgyTimelineSummarizer(singleSlug: String? = nil) {
         isRunningAction = true
-        runningActionLabel = singleSlug == nil
-            ? "正在后台调用 agy (gemini-4-argon-high) 提炼 \(activeDate) 每日回顾与时段摘要..."
-            : "正在后台调用 agy (gemini-4-argon-high) 提炼时段摘要..."
+        runningActionLabel = "正在后台提炼 \(activeDate) 每日回顾与时段重点..."
         let targetDate = activeDate
         Task.detached(priority: .userInitiated) {
             let root = AppPaths.workspaceRootDir
@@ -1227,16 +1282,17 @@ struct TimelineSettingsView: View {
                 ? venvPy
                 : URL(fileURLWithPath: "/usr/bin/python3")
             let script = root.appendingPathComponent("scripts/summarize_timeline_agy.py")
+
             let proc = Process()
             proc.executableURL = pyURL
-            var args = [script.path, "--date", targetDate, "--timeout", "90"]
+            var args = [script.path, "--date", targetDate]
             if let singleSlug {
                 args.append(contentsOf: ["--slug", singleSlug])
             }
             proc.arguments = args
             var env = ProcessInfo.processInfo.environment
-            let extraPaths = "/opt/homebrew/bin:/usr/local/bin:\(NSHomeDirectory())/.local/bin"
-            env["PATH"] = "\(extraPaths):\(env["PATH"] ?? "/usr/bin:/bin")"
+            let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "\(NSHomeDirectory())/.local/bin"]
+            env["PATH"] = (extraPaths + [env["PATH"] ?? "/usr/bin:/bin"]).joined(separator: ":")
             proc.environment = env
 
             let pipe = Pipe()
@@ -1248,7 +1304,7 @@ struct TimelineSettingsView: View {
             await MainActor.run {
                 isRunningAction = false
                 runningActionLabel = ""
-                statusBanner = "✨ 已通过 agy (gemini-4-argon-high) 更新 \(targetDate) 时段摘要与每日回顾"
+                statusBanner = "已更新 \(targetDate) 每日回顾与时段摘要"
                 reloadTimeline()
             }
         }
@@ -1256,7 +1312,7 @@ struct TimelineSettingsView: View {
 
     private func runDailyTimelineBuilder() {
         isRunningAction = true
-        runningActionLabel = "正在生成 \(activeDate) Markdown 时间线汇总包..."
+        runningActionLabel = "正在导出 \(activeDate) 时间线汇总文稿..."
         let targetDate = selectedDate == "ALL" ? nil : activeDate
         Task.detached(priority: .userInitiated) {
             let root = AppPaths.workspaceRootDir
@@ -1334,26 +1390,35 @@ struct TimelineSettingsView: View {
 
     private struct DateDisplayParts {
         let dayNumber: String
-        let weekday: String
-        let yearMonth: String
+        let weekdayName: String
+        let yearMonthLabel: String
         let relativeLabel: String
     }
 
     private static func parseDateDisplay(_ dateStr: String) -> DateDisplayParts {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
-        let date = df.date(from: dateStr) ?? Date()
+        guard let date = df.date(from: dateStr) else {
+            return DateDisplayParts(dayNumber: "--", weekdayName: "全部日期", yearMonthLabel: dateStr, relativeLabel: "历史")
+        }
         let cal = Calendar.current
-        let day = cal.component(.day, from: date)
+        let day = String(format: "%02d", cal.component(.day, from: date))
         let year = cal.component(.year, from: date)
         let month = cal.component(.month, from: date)
         let weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
         let wdIdx = max(1, min(7, cal.component(.weekday, from: date))) - 1
-        let rel = cal.isDateInToday(date) ? "今天" : (cal.isDateInYesterday(date) ? "昨天" : "\(month)月\(day)日")
+
+        let rel = if cal.isDateInToday(date) {
+            "今天"
+        } else if cal.isDateInYesterday(date) {
+            "昨天"
+        } else {
+            "\(month)月\(day)日"
+        }
         return DateDisplayParts(
-            dayNumber: String(format: "%02d", day),
-            weekday: weekdays[wdIdx],
-            yearMonth: "\(year)年\(month)月",
+            dayNumber: day,
+            weekdayName: weekdays[wdIdx],
+            yearMonthLabel: "\(year)年 \(month)月",
             relativeLabel: rel,
         )
     }
@@ -1378,7 +1443,7 @@ struct TimelineSettingsView: View {
     }
 }
 
-// MARK: - Timeline Scanner & Digest Loader
+// MARK: - Timeline Scanner, Voice-Memo Clusterer & Digest Loader
 
 enum TimelineScanner {
     private static let stampRegex = try? NSRegularExpression(pattern: #"^(\d{8})_(\d{4,6})(?:_(.+))?$"#)
@@ -1407,198 +1472,377 @@ enum TimelineScanner {
             .appendingPathComponent("daily_timelines", isDirectory: true)
             .appendingPathComponent("user_notes.json")
         guard let data = try? Data(contentsOf: notesURL),
-              let dict = try? JSONDecoder().decode([String: String].self, from: data)
-        else {
+              let dict = try? JSONDecoder().decode([String: String].self, from: data) else {
             return [:]
         }
         return dict
     }
 
     static func saveUserNotes(_ notes: [String: String], outputDir: URL) {
-        let timelinesDir = outputDir.appendingPathComponent("daily_timelines", isDirectory: true)
-        try? FileManager.default.createDirectory(at: timelinesDir, withIntermediateDirectories: true)
-        let notesURL = timelinesDir.appendingPathComponent("user_notes.json")
-        if let data = try? JSONEncoder().encode(notes) {
+        let dir = outputDir.appendingPathComponent("daily_timelines", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let notesURL = dir.appendingPathComponent("user_notes.json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(notes) {
             try? data.write(to: notesURL, options: .atomic)
         }
     }
 
     static func scan(
         outputDir: URL,
-        stagingDir: URL,
-        digestsByDate: [String: DailyTimelineDigest] = [:],
-        userNotes: [String: String] = [:],
+        recordingsDir: URL,
+        digestsByDate: [String: DailyTimelineDigest],
+        userNotes: [String: String],
     ) -> [TimelineEntry] {
         let fm = FileManager.default
-        let protocolsSubdir = outputDir.appendingPathComponent("protocols", isDirectory: true)
-        let recordingsSubdir = outputDir.appendingPathComponent("recordings", isDirectory: true)
+        let protocolsDir = outputDir.appendingPathComponent("protocols", isDirectory: true)
+        let altRecordingsDir = outputDir.appendingPathComponent("recordings", isDirectory: true)
 
-        var textBySlug: [String: URL] = [:]
-        for dir in [protocolsSubdir, outputDir] {
-            guard let urls = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
-            for url in urls {
-                let ext = url.pathExtension.lowercased()
-                guard ext == "txt" || ext == "md" else { continue }
-                let name = url.deletingPathExtension().lastPathComponent
-                guard !name.hasPrefix(".") else { continue }
-                let slug = name.hasSuffix(".qwen3") ? String(name.dropLast(".qwen3".count)) : name
-                let normalizedSlug = normalizeAudioStem(slug)
-                if textBySlug[normalizedSlug] == nil || ext == "md" || name.hasSuffix(".qwen3") {
-                    textBySlug[normalizedSlug] = url
-                }
-            }
-        }
-
-        var mixBySlug: [String: URL] = [:]
-        var micBySlug: [String: URL] = [:]
-        var appBySlug: [String: URL] = [:]
-        for dir in [recordingsSubdir, outputDir, stagingDir] {
-            guard let urls = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
-            for url in urls where url.pathExtension.lowercased() == "wav" {
+        var protocolFiles: [String: URL] = [:]
+        for dir in [protocolsDir, outputDir] {
+            guard let urls = try? fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+            ) else { continue }
+            for url in urls where ["txt", "md"].contains(url.pathExtension.lowercased()) {
                 let stem = url.deletingPathExtension().lastPathComponent
-                let slug = normalizeAudioStem(stem)
-                if stem.hasSuffix("_mic") || stem.hasSuffix("_mic_16k") {
-                    if micBySlug[slug] == nil { micBySlug[slug] = url }
-                } else if stem.hasSuffix("_app") || stem.hasSuffix("_app_16k") {
-                    if appBySlug[slug] == nil { appBySlug[slug] = url }
-                } else {
-                    if mixBySlug[slug] == nil { mixBySlug[slug] = url }
+                if stem.hasPrefix(".") || stem.hasSuffix("_timeline") || stem.hasSuffix("_bundle") { continue }
+                let normalizedStem = stem.hasSuffix(".qwen3")
+                    ? String(stem.dropLast(".qwen3".count))
+                    : stem
+                if protocolFiles[normalizedStem] == nil || stem.hasSuffix(".qwen3") {
+                    protocolFiles[normalizedStem] = url
                 }
             }
         }
 
-        // Collect minute prefixes (`YYYYMMDD_HHMM`) that already have a transcribed slug
-        let transcribedMinutePrefixes = Set(
-            textBySlug.keys.compactMap { slug -> String? in
-                guard slug.count >= 13 else { return nil }
-                return String(slug.prefix(13))
-            },
-        )
+        var audioFiles: [String: URL] = [:]
+        var speakerSidecars: [String: [String]] = [:]
+        for dir in [altRecordingsDir, recordingsDir] {
+            guard let urls = try? fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+            ) else { continue }
+            for url in urls {
+                let name = url.lastPathComponent
+                if name.hasSuffix("_speakers.json") {
+                    let key = String(name.dropLast("_speakers.json".count))
+                    if let names = parseSpeakerNames(from: url), !names.isEmpty {
+                        speakerSidecars[key] = names
+                    }
+                    continue
+                }
+                guard ["wav", "m4a"].contains(url.pathExtension.lowercased()) else { continue }
+                let stem = url.deletingPathExtension().lastPathComponent
+                if stem.hasSuffix("_16k") { continue }
+                let key = normalizeAudioKey(stem)
+                if audioFiles[key] == nil || stem.hasSuffix("_mix") {
+                    audioFiles[key] = url
+                }
+            }
+        }
 
-        let allSlugs = Set(textBySlug.keys).union(mixBySlug.keys).union(micBySlug.keys).union(appBySlug.keys)
-        var results: [TimelineEntry] = []
+        let allKeys = Set(protocolFiles.keys).union(audioFiles.keys)
+        var rawItems: [TimelineEntry] = []
 
-        for slug in allSlugs {
-            let nsSlug = slug as NSString
-            let isRawAudioSlug = rawAudioOnlySlugRegex?.firstMatch(
-                in: slug,
-                range: NSRange(location: 0, length: nsSlug.length),
-            ) != nil
-            if isRawAudioSlug, textBySlug[slug] == nil {
-                let minutePrefix = String(slug.prefix(13))
-                if transcribedMinutePrefixes.contains(minutePrefix) {
+        for key in allKeys {
+            let pURL = protocolFiles[key]
+            if pURL == nil, let rx = rawAudioOnlySlugRegex {
+                let range = NSRange(key.startIndex ..< key.endIndex, in: key)
+                if rx.firstMatch(in: key, range: range) != nil {
                     continue
                 }
             }
+            let aURL = audioFiles[key]
+            let refURL = pURL ?? aURL
+            let mtime = (try? refURL?.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
+            let (dateStr, timeStr, rawTitle) = parseSlug(key, fallbackDate: mtime)
 
-            let txtURL = textBySlug[slug]
-            let micURL = micBySlug[slug]
-            let appURL = appBySlug[slug]
-            let primaryAudio = mixBySlug[slug] ?? micURL ?? appURL
-            let (dateStr, timeStr, hmStr, hourInt, rawTitle) = parseSlug(slug, fallbackURL: txtURL ?? primaryAudio)
-            let content = (txtURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let duration = primaryAudio.map(audioDurationSeconds) ?? 0
-            let speakers = extractSpeakers(from: content)
-            let entryDigest = digestsByDate[dateStr]?.entries?[slug]
+            var preview = ""
+            var fullText = ""
+            if let pURL, let text = try? String(contentsOf: pURL, encoding: .utf8) {
+                fullText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let lines = fullText
+                    .components(separatedBy: .newlines)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                preview = lines.prefix(6).joined(separator: "\n")
+            }
 
-            results.append(
+            let dur = aURL.flatMap { audioDurationSeconds(for: $0) }
+                ?? estimateDurationFromTranscript(fullText)
+            var spks = speakerSidecars[key] ?? []
+            if spks.isEmpty, !fullText.isEmpty {
+                spks = extractSpeakersFromTranscript(fullText)
+            }
+
+            let entryDigest = digestsByDate[dateStr]?.entries?[key]
+            let customNote = userNotes[key]
+
+            rawItems.append(
                 TimelineEntry(
-                    id: slug,
+                    id: key,
                     dateString: dateStr,
                     timeString: timeStr,
-                    hourMinuteString: hmStr,
-                    hourOfDay: hourInt,
-                    sortKey: "\(dateStr)_\(timeStr)_\(slug)",
                     rawTitle: rawTitle,
-                    transcriptURL: txtURL,
-                    audioURL: primaryAudio,
-                    micAudioURL: micURL,
-                    appAudioURL: appURL,
-                    durationSeconds: duration,
-                    transcriptText: content,
-                    speakers: speakers,
+                    protocolURL: pURL,
+                    audioURL: aURL,
+                    transcriptPreview: preview,
+                    fullTranscriptText: fullText,
+                    fileDate: mtime,
+                    durationSeconds: dur,
+                    speakerNames: spks,
                     aiDigest: entryDigest,
-                    userNote: userNotes[slug],
+                    userNote: customNote,
+                    subClips: [],
+                    foldedFragmentCount: 0,
                 ),
             )
         }
 
-        return results.sorted { $0.sortKey > $1.sortKey }
+        return clusterVoiceMemos(rawItems, userNotes: userNotes)
     }
 
-    private static func normalizeAudioStem(_ stem: String) -> String {
-        for suffix in ["_mix_16k", "_app_16k", "_mic_16k", "_16k", "_mix", "_app", "_mic"] {
-            if stem.hasSuffix(suffix) {
-                return String(stem.dropLast(suffix.count))
+    /// Groups consecutive short `语音输入速记` clips within a 15-minute window into consolidated
+    /// personal-focus sessions and folds out AI meta-prompts / trivial `<22 char` fragments.
+    private static func clusterVoiceMemos(_ items: [TimelineEntry], userNotes: [String: String]) -> [TimelineEntry] {
+        let sortedAsc = items.sorted { $0.sortKey < $1.sortKey }
+        var result: [TimelineEntry] = []
+        var currentCluster: [TimelineEntry] = []
+
+        func flushCluster() {
+            guard !currentCluster.isEmpty else { return }
+            if let merged = mergeVoiceMemoCluster(currentCluster, userNotes: userNotes) {
+                result.append(merged)
             }
+            currentCluster.removeAll()
+        }
+
+        for item in sortedAsc {
+            if !item.isVoiceMemoFocus || item.durationSeconds >= 180 {
+                flushCluster()
+                result.append(item)
+                continue
+            }
+
+            if let last = currentCluster.last {
+                let sameDate = last.dateString == item.dateString
+                let minsDiff = abs(minutesSinceMidnight(item.timeString) - minutesSinceMidnight(last.timeString))
+                if sameDate, minsDiff <= 12 {
+                    currentCluster.append(item)
+                } else {
+                    flushCluster()
+                    currentCluster = [item]
+                }
+            } else {
+                currentCluster = [item]
+            }
+        }
+        flushCluster()
+
+        return result.sorted { $0.sortKey > $1.sortKey }
+    }
+
+    private static func isTrivialOrMetaPrompt(_ entry: TimelineEntry) -> Bool {
+        if entry.aiDigest?.densityLabel == "碎片输入" {
+            return true
+        }
+        let metaKeywords = ["弹通知", "状态栏", "提示词", "界面拉窄", "增加更多的通知", "语音输入法"]
+        for kw in metaKeywords where entry.fullTranscriptText.contains(kw) {
+            return true
+        }
+        let stripped = entry.fullTranscriptText
+            .replacingOccurrences(of: #"^\[[^\]]+\]\s*(?:\[[^\]]+\]|[^:]+):\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.count < 22 && (entry.aiDigest?.highlightsCount ?? 0) == 0
+    }
+
+    private static func mergeVoiceMemoCluster(_ cluster: [TimelineEntry], userNotes: [String: String]) -> TimelineEntry? {
+        guard let first = cluster.first else { return nil }
+        let substantive = cluster.filter { !isTrivialOrMetaPrompt($0) }
+        let trivialCount = cluster.count - substantive.count
+
+        // If every clip in this cluster is a trivial fragment / AI meta-prompt and has no user note, skip cluttering the main stream
+        let clusterNotes = cluster.compactMap { userNotes[$0.id] }.filter { !$0.isEmpty }
+        if substantive.isEmpty, clusterNotes.isEmpty {
+            return nil
+        }
+
+        let activeItems = substantive.isEmpty ? cluster : substantive
+        let subClips: [TimelineSubClip] = cluster.map { item in
+            TimelineSubClip(
+                id: item.id,
+                timeString: item.hourMinuteString,
+                durationSeconds: item.durationSeconds,
+                summary: item.narrativeSummary,
+                transcriptText: item.fullTranscriptText,
+                audioURL: item.audioURL,
+                protocolURL: item.protocolURL,
+                isTrivialFragment: isTrivialOrMetaPrompt(item),
+            )
+        }
+
+        if cluster.count == 1, let single = substantive.first {
+            return single
+        }
+
+        let totalDur = cluster.reduce(0.0) { $0 + $1.durationSeconds }
+        var combinedHighlights: [String] = []
+        var combinedTodos: [String] = []
+        var combinedTags: [String] = []
+        for item in activeItems {
+            for h in item.highlights where !combinedHighlights.contains(h) {
+                combinedHighlights.append(h)
+            }
+            for t in item.todos where !combinedTodos.contains(t) {
+                combinedTodos.append(t)
+            }
+            for tg in item.tags where !combinedTags.contains(tg) {
+                combinedTags.append(tg)
+            }
+        }
+
+        let combinedSummary: String = if activeItems.count == 1 {
+            activeItems[0].narrativeSummary
+        } else {
+            activeItems.map { item -> String in
+                item.narrativeSummary
+                    .replacingOccurrences(of: "你通过语音速记", with: "")
+                    .replacingOccurrences(of: "你主动语音输入当前关注重点：", with: "")
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "，。； "))
+            }
+            .prefix(3)
+            .joined(separator: "；") + "。"
+        }
+
+        let combinedTranscript = cluster.map { item in
+            "--- [\(item.hourMinuteString)] \(item.id) ---\n\(item.fullTranscriptText)"
+        }.joined(separator: "\n\n")
+
+        let mergedDigest = TimelineEntryDigest(
+            shortTitle: activeItems.first?.displayTitle ?? first.displayTitle,
+            summary: combinedSummary.hasPrefix("你") ? combinedSummary : "你围绕当前关注重点连续梳理：\(combinedSummary)",
+            densityLabel: "当前关注",
+            highlightsCount: combinedHighlights.count,
+            tags: combinedTags,
+            highlights: combinedHighlights,
+            todos: combinedTodos,
+        )
+
+        return TimelineEntry(
+            id: first.id,
+            dateString: first.dateString,
+            timeString: first.timeString,
+            rawTitle: first.rawTitle,
+            protocolURL: activeItems.first?.protocolURL ?? first.protocolURL,
+            audioURL: activeItems.first?.audioURL ?? first.audioURL,
+            transcriptPreview: activeItems.first?.transcriptPreview ?? first.transcriptPreview,
+            fullTranscriptText: combinedTranscript,
+            fileDate: first.fileDate,
+            durationSeconds: totalDur,
+            speakerNames: ["Kenny"],
+            aiDigest: mergedDigest,
+            userNote: clusterNotes.first,
+            subClips: subClips,
+            foldedFragmentCount: trivialCount,
+        )
+    }
+
+    private static func minutesSinceMidnight(_ timeStr: String) -> Int {
+        let parts = timeStr.split(separator: ":").compactMap { Int($0) }
+        guard parts.count >= 2 else { return 0 }
+        return parts[0] * 60 + parts[1]
+    }
+
+    private static func normalizeAudioKey(_ stem: String) -> String {
+        for suffix in ["_mix", "_app", "_mic"] where stem.hasSuffix(suffix) {
+            return String(stem.dropLast(suffix.count))
         }
         return stem
     }
 
-    private static func parseSlug(_ slug: String, fallbackURL: URL?) -> (String, String, String, Int, String) {
-        let ns = slug as NSString
-        if let match = stampRegex?.firstMatch(in: slug, range: NSRange(location: 0, length: ns.length)) {
-            let d = ns.substring(with: match.range(at: 1))
-            let t = ns.substring(with: match.range(at: 2))
-            let dateFormatted = "\(d.prefix(4))-\(d.dropFirst(4).prefix(2))-\(d.suffix(2))"
-            let hh = String(t.prefix(2))
-            let mm = String(t.dropFirst(2).prefix(2))
-            let ss = t.count >= 6 ? String(t.suffix(2)) : "00"
-            let timeFormatted = "\(hh):\(mm):\(ss)"
-            let hmFormatted = "\(hh):\(mm)"
-            let hourInt = Int(hh) ?? 0
+    private static func parseSlug(_ key: String, fallbackDate: Date) -> (String, String, String) {
+        let ns = key as NSString
+        if let regex = stampRegex,
+           let match = regex.firstMatch(in: key, range: NSRange(location: 0, length: ns.length)) {
+            let dRaw = ns.substring(with: match.range(at: 1))
+            let tRaw = ns.substring(with: match.range(at: 2))
+            let dateStr = "\(dRaw.prefix(4))-\(dRaw.dropFirst(4).prefix(2))-\(dRaw.suffix(2))"
+            let hh = tRaw.prefix(2)
+            let mm = tRaw.dropFirst(2).prefix(2)
+            let ss = tRaw.count >= 6 ? String(tRaw.suffix(2)) : "00"
+            let timeStr = "\(hh):\(mm):\(ss)"
 
-            var titlePart = match.range(at: 3).location != NSNotFound
-                ? ns.substring(with: match.range(at: 3))
-                : "语音记录"
-            let nsTitle = titlePart as NSString
-            if let hexMatch = hexSuffixRegex?.firstMatch(in: titlePart, range: NSRange(location: 0, length: nsTitle.length)) {
-                titlePart = nsTitle.substring(to: hexMatch.range.location)
+            var title = "语音记录"
+            if match.range(at: 3).location != NSNotFound {
+                var raw = ns.substring(with: match.range(at: 3))
+                if let hexRx = hexSuffixRegex {
+                    raw = hexRx.stringByReplacingMatches(
+                        in: raw,
+                        range: NSRange(location: 0, length: (raw as NSString).length),
+                        withTemplate: "",
+                    )
+                }
+                raw = raw.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
+                if !raw.isEmpty { title = raw }
             }
-            titlePart = titlePart.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
-            let lowered = titlePart.lowercased()
-            if lowered == "wwmapp call" {
-                titlePart = "企微会议"
-            } else if lowered == "tencent meeting call" {
-                titlePart = "腾讯会议"
-            } else if titlePart.isEmpty {
-                titlePart = "语音记录"
-            }
-            return (dateFormatted, timeFormatted, hmFormatted, hourInt, titlePart)
+            return (dateStr, timeStr, title)
         }
 
-        let mtime = (fallbackURL.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date }) ?? Date()
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         let tf = DateFormatter()
         tf.dateFormat = "HH:mm:ss"
-        let hmf = DateFormatter()
-        hmf.dateFormat = "HH:mm"
-        let hour = Calendar.current.component(.hour, from: mtime)
-        return (df.string(from: mtime), tf.string(from: mtime), hmf.string(from: mtime), hour, slug)
+        return (df.string(from: fallbackDate), tf.string(from: fallbackDate), key)
     }
 
-    private static func extractSpeakers(from text: String) -> [String] {
-        guard !text.isEmpty, let regex = speakerBracketRegex else { return [] }
+    private static func audioDurationSeconds(for url: URL) -> TimeInterval? {
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let sr = file.processingFormat.sampleRate
+        guard sr > 0 else { return nil }
+        return Double(file.length) / sr
+    }
+
+    private static func estimateDurationFromTranscript(_ text: String) -> TimeInterval {
+        guard let regex = try? NSRegularExpression(pattern: #"\[(\d{2}):(\d{2})\]"#) else { return 0 }
         let ns = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        guard let last = matches.last else { return 0 }
+        let mm = Double(ns.substring(with: last.range(at: 1))) ?? 0
+        let ss = Double(ns.substring(with: last.range(at: 2))) ?? 0
+        return mm * 60 + ss + 8
+    }
+
+    private static func parseSpeakerNames(from url: URL) -> [String]? {
+        guard let data = try? Data(contentsOf: url),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return nil
+        }
         var seen: [String] = []
-        for m in matches {
-            let s1 = m.range(at: 1).location != NSNotFound ? ns.substring(with: m.range(at: 1)) : ""
-            let s2 = m.range(at: 2).location != NSNotFound ? ns.substring(with: m.range(at: 2)) : ""
-            let spk = (s1.isEmpty ? s2 : s1).trimmingCharacters(in: .whitespaces)
-            if !spk.isEmpty, !seen.contains(spk) {
-                seen.append(spk)
+        for item in arr {
+            if let name = item["autoName"] as? String ?? item["label"] as? String,
+               !name.isEmpty, !seen.contains(name) {
+                seen.append(name)
             }
         }
         return seen
     }
 
-    private static func audioDurationSeconds(_ url: URL) -> Double {
-        guard let file = try? AVAudioFile(forReading: url) else { return 0 }
-        let sr = file.processingFormat.sampleRate
-        guard sr > 0 else { return 0 }
-        return Double(file.length) / sr
+    private static func extractSpeakersFromTranscript(_ text: String) -> [String] {
+        guard let rx = speakerBracketRegex else { return [] }
+        let ns = text as NSString
+        let matches = rx.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        var seen: [String] = []
+        for m in matches {
+            let r1 = m.range(at: 1)
+            let r2 = m.range(at: 2)
+            let raw = r1.location != NSNotFound ? ns.substring(with: r1) : (r2.location != NSNotFound ? ns.substring(with: r2) : "")
+            let name = raw.trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty, !seen.contains(name) {
+                seen.append(name)
+            }
+        }
+        return seen
     }
 }

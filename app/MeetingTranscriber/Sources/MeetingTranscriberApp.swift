@@ -25,14 +25,35 @@ private struct AnimatedMenuBarIcon: View {
     let micSilentOverlay: Bool
     let appSilentOverlay: Bool
 
+    @State private var animationTick: Int = 0
+    @State private var transitionStep: Int = 10
+
     var body: some View {
         Image(nsImage: MenuBarIcon.statusBarImage(
             badge: badge,
+            animationTick: animationTick,
+            transitionStep: transitionStep,
             permissionOverlay: permissionOverlay,
             recordOnlyOverlay: recordOnlyOverlay,
             micSilentOverlay: micSilentOverlay,
             appSilentOverlay: appSilentOverlay,
         ))
+        .onChange(of: badge) { oldBadge, newBadge in
+            if newBadge == .recording, oldBadge != .recording {
+                transitionStep = 0
+                animationTick = 0
+            }
+        }
+        .onReceive(
+            Timer.publish(every: 0.065, on: .main, in: MenuBarIcon.animationRunLoopMode).autoconnect(),
+        ) { _ in
+            guard badge == .recording else { return }
+            if transitionStep < 10 {
+                transitionStep += 1
+            } else {
+                animationTick = (animationTick + 1) % 16
+            }
+        }
     }
 }
 
