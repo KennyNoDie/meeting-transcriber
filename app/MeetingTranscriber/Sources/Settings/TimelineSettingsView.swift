@@ -475,7 +475,7 @@ struct TimelineSettingsView: View {
                         .fill(primaryInk)
                         .frame(width: 2.2, height: 13)
                 }
-                Text("Auday")
+                Text("Kennyday")
                     .font(.system(size: 16.5, weight: .semibold, design: .serif))
                     .foregroundStyle(primaryInk)
                     .tracking(-0.3)
