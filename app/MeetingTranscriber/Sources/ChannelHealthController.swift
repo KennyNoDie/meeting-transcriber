@@ -134,7 +134,10 @@ final class ChannelHealthController {
     /// Red tint for the menu bar's **bottom** half. See `micSilentOverlay` for
     /// why the flags are read before the topology is consulted.
     var appSilentOverlay: Bool {
-        let silent = appSilentActive || recordingSilentActive
+        // Once the remote channel has delivered real speech energy in this meeting,
+        // quiet periods while the local user speaks are normal turn-taking, not a dead tap.
+        let neverHadAppEnergy = appAges.secondsSinceLastEnergy == nil
+        let silent = (appFault != nil) || recordingSilentActive || (appSilentActive && neverHadAppEnergy)
         return indicatorEnabled() && channels.app && silent
     }
 

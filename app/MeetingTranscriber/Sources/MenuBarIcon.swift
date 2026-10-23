@@ -148,6 +148,97 @@ enum MenuBarIcon {
         return frames[animationFrame % frames.count]
     }
 
+    /// Simplified 4-state crisp menu bar image (zero choppy frame animation):
+    /// 1. 没录（Idle）: static monochrome template waveform (18x18).
+    /// 2. 在录（Recording - Normal）: static waveform + crisp green live dot in bottom-right (18x18).
+    /// 3. 在录但没声音 / 权限异常（Silent / Fault）: full red waveform + red exclamation mark (18x18).
+    /// 4. 转录状态（Transcribing / Diarizing / Processing）: static waveform + blue dot + crisp "转录中" text (54x18).
+    static func statusBarImage(
+        badge: BadgeKind,
+        permissionOverlay: Bool = false,
+        recordOnlyOverlay: Bool = false,
+        micSilentOverlay: Bool = false,
+        appSilentOverlay: Bool = false,
+    ) -> NSImage {
+        let isSilentOrError = permissionOverlay || micSilentOverlay || appSilentOverlay || badge == .error
+        let isTranscribingState = badge == .transcribing || badge == .diarizing || badge == .processing
+        let isRecordingNormal = badge == .recording && !isSilentOrError
+
+        // State 1: 没录 (Idle / Done) -> Clean static 18x18 template waveform
+        if !isSilentOrError, !isTranscribingState, !isRecordingNormal, !recordOnlyOverlay {
+            let iconSize = NSSize(width: 18, height: 18)
+            let img = NSImage(size: iconSize, flipped: false) { rect in
+                NSColor.black.setFill()
+                drawRecordingAnimation(in: rect, frame: 0)
+                if badge == .updateAvailable {
+                    drawUpdateArrow(in: rect)
+                }
+                return true
+            }
+            img.isTemplate = true
+            return img
+        }
+
+        let isDark = NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let fgColor = isDark ? NSColor.white : NSColor.black
+        let iconRect = NSRect(x: 0, y: 0, width: 18, height: 18)
+
+        // State 4: 转录中 -> 54x18 crisp icon + "转录中" text (zero choppy animation)
+        if isTranscribingState, !isSilentOrError {
+            let totalSize = NSSize(width: 54, height: 18)
+            let img = NSImage(size: totalSize, flipped: false) { _ in
+                fgColor.setFill()
+                drawRecordingAnimation(in: iconRect, frame: 0)
+                drawStatusDot(in: iconRect, color: NSColor.systemBlue)
+
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                    .foregroundColor: fgColor,
+                ]
+                let label = NSAttributedString(string: "转录中", attributes: attrs)
+                let labelSize = label.size()
+                let textPoint = NSPoint(x: 19, y: (18 - labelSize.height) / 2)
+                label.draw(at: textPoint)
+                return true
+            }
+            img.isTemplate = false
+            return img
+        }
+
+        // State 2 (在录) or State 3 (在录但没声音 / 异常) -> 18x18 non-template image
+        let img = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            if isSilentOrError {
+                NSColor.systemRed.setFill()
+                drawRecordingAnimation(in: rect, frame: 0)
+                drawExclamationBadge(in: rect)
+            } else if isRecordingNormal {
+                fgColor.setFill()
+                drawRecordingAnimation(in: rect, frame: 0)
+                drawStatusDot(in: rect, color: NSColor.systemGreen)
+            } else {
+                fgColor.setFill()
+                drawRecordingAnimation(in: rect, frame: 0)
+                if recordOnlyOverlay {
+                    drawRecordOnlyBadge(in: rect)
+                }
+            }
+            return true
+        }
+        img.isTemplate = false
+        return img
+    }
+
+    private static func drawStatusDot(in rect: NSRect, color: NSColor) {
+        let size: CGFloat = 5.6
+        let margin: CGFloat = 0.5
+        let cx = rect.maxX - size / 2 - margin
+        let cy = rect.minY + size / 2 + margin
+        color.setFill()
+        NSBezierPath(
+            ovalIn: NSRect(x: cx - size / 2, y: cy - size / 2, width: size, height: size),
+        ).fill()
+    }
+
     // MARK: - Rendering
 
     private static func renderImage(

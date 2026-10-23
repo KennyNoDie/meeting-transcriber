@@ -57,8 +57,13 @@ enum AppPaths {
         persistentOutputDir
     }
 
-    /// Speaker voice profiles DB.
-    static let speakersDB = dataDir.appendingPathComponent("speakers.json")
+    /// Speaker voice profiles DB (stored in persistent outputs dir so Agent skills and backups can access it directly).
+    static var speakersDB: URL {
+        persistentOutputDir.appendingPathComponent("speakers.json")
+    }
+
+    /// Legacy speaker DB location under Application Support.
+    static let legacySpeakersDB = dataDir.appendingPathComponent("speakers.json")
 
     /// Custom protocol prompt file.
     static let customPromptFile = dataDir.appendingPathComponent("protocol_prompt.md")

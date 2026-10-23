@@ -73,36 +73,52 @@ def apply_terminology_rules(text: str, rules: list[tuple[str, list[str]]]) -> st
     return out
 
 
+def is_vocab_hallucination(text: str, vocab_terms: list[str]) -> bool:
+    """Detect silent-chunk prompt echoing where Qwen3-ASR repeats the vocabulary list."""
+    if not text:
+        return True
+    if "大家都在玩" in text and "发现" in text and ("游廊" in text or "FluidAudio" in text or "Brainrot" in text):
+        return True
+    if len(vocab_terms) >= 5:
+        hits = sum(1 for term in vocab_terms if len(term) >= 2 and term in text)
+        if hits >= 5:
+            return True
+    return False
+
+
 def trim_silence_bounds(
     chunk_audio: np.ndarray,
     sr: int,
     chunk_start: float,
     rms_threshold: float = 0.006,
     frame_sec: float = 0.05,
-) -> tuple[float, float]:
-    """Refine speech onset and offset within an audio chunk using short-frame RMS energy."""
+) -> tuple[float, float, bool]:
+    """Refine speech onset and offset within an audio chunk using short-frame RMS energy.
+    Returns (refined_start, refined_end, has_speech).
+    """
     n_samples = len(chunk_audio)
     if n_samples == 0 or sr <= 0:
-        return chunk_start, chunk_start
+        return chunk_start, chunk_start, False
     duration = n_samples / sr
     frame_len = max(1, int(frame_sec * sr))
     n_frames = n_samples // frame_len
     if n_frames <= 1:
-        return chunk_start, chunk_start + duration
+        rms_val = float(np.sqrt(np.mean(chunk_audio**2)))
+        return chunk_start, chunk_start + duration, rms_val >= rms_threshold
 
     frames = chunk_audio[: n_frames * frame_len].reshape(n_frames, frame_len)
     rms = np.sqrt(np.mean(frames**2, axis=1))
     active = np.where(rms >= rms_threshold)[0]
     if len(active) == 0:
-        return chunk_start, chunk_start + duration
+        return chunk_start, chunk_start + duration, False
 
     first_idx = max(0, int(active[0]) - 1)
     last_idx = min(n_frames, int(active[-1]) + 2)
     refined_start = chunk_start + (first_idx * frame_len) / sr
     refined_end = chunk_start + min(duration, (last_idx * frame_len) / sr)
     if refined_end <= refined_start:
-        return chunk_start, chunk_start + duration
-    return refined_start, refined_end
+        return chunk_start, chunk_start + duration, True
+    return refined_start, refined_end, True
 
 
 def split_chunk_into_sentence_segments(
@@ -178,10 +194,15 @@ def transcribe_to_segments(
         elif norm != "auto":
             lang_arg = language
 
+    vocab_terms = [t.strip() for t in vocab_context.split() if t.strip()]
+
+    # Do not pass raw keyword list as `context=` to mlx_qwen3_asr.transcribe:
+    # Qwen3-ASR echoes `context` verbatim on low-energy/breathing chunks.
+    # Instead, rely on post-ASR `apply_terminology_rules` + Auday Agent correction.
     res = mlx_qwen3_asr.transcribe(
         audio_np,
         model=model_id,
-        context=vocab_context,
+        context=None,
         language=lang_arg,
         return_chunks=True,
         verbose=False,
@@ -200,16 +221,20 @@ def transcribe_to_segments(
         raw_text = (item.get("text") or "").strip()
         if not raw_text:
             continue
-        normalized_text = apply_terminology_rules(raw_text, rules)
         c_start = float(item.get("start", 0.0))
         c_end = float(item.get("end", c_start))
         s_idx = max(0, int(c_start * SAMPLE_RATE))
         e_idx = min(len(audio_np), int(c_end * SAMPLE_RATE))
         sub_audio = audio_np[s_idx:e_idx]
-        refined_start, refined_end = trim_silence_bounds(sub_audio, SAMPLE_RATE, c_start)
-        segments.extend(
-            split_chunk_into_sentence_segments(normalized_text, refined_start, refined_end)
-        )
+        refined_start, refined_end, has_speech = trim_silence_bounds(sub_audio, SAMPLE_RATE, c_start)
+        if not has_speech:
+            continue
+        normalized_text = apply_terminology_rules(raw_text, rules)
+        if is_vocab_hallucination(normalized_text, vocab_terms):
+            continue
+        for seg in split_chunk_into_sentence_segments(normalized_text, refined_start, refined_end):
+            if not is_vocab_hallucination(seg["text"], vocab_terms):
+                segments.append(seg)
 
     return segments
 

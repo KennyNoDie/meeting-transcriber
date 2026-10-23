@@ -586,6 +586,8 @@ extension PipelineQueue {
                     job: (jobID: ctx.jobID, title: ctx.title, slug: ctx.slug, participants: ctx.participants),
                     diarizeProcess: diarizeProcess, isDualSource: transcription.isDualSource,
                     outputDir: outputDir,
+                    micLabel: micLabel,
+                    autoEnrollSpeakers: naming.speakerNamingHandler == nil,
                 )
             }
 

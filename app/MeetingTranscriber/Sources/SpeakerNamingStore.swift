@@ -45,11 +45,12 @@ struct SpeakerNamingStore {
     /// the tests that pin it cannot drift apart. `namingJSONSuffix` is kept
     /// separate because `deleteNamingJSON` removes only that one.
     static let namingJSONSuffix = "_naming.json"
+    static let persistentSpeakersSuffix = "_speakers.json"
     static let segmentsSuffix = "_segments.json"
     static let mixSuffix = "_16k.wav"
     static let appTrackSuffix = "_app_16k.wav"
     static let micTrackSuffix = "_mic_16k.wav"
-    static let sidecarSuffixes = [mixSuffix, appTrackSuffix, micTrackSuffix, segmentsSuffix]
+    static let sidecarSuffixes = [mixSuffix, appTrackSuffix, micTrackSuffix]
 
     private var recordingsDir: URL? {
         outputDir?.appendingPathComponent("recordings")
@@ -86,6 +87,22 @@ struct SpeakerNamingStore {
         try json.write(to: path, options: .atomic)
         // Carries per-speaker voice embeddings — restrict to owner-only.
         try FileManager.default.restrictToOwner(path)
+
+        // Also persist `<slug>_speakers.json` permanently so the Agent voiceprint
+        // workflow (`timeline_cli.py`) can inspect embeddings and reassign speakers
+        // after the job finishes and temporary `_naming.json` is cleaned up.
+        savePersistentSpeakers(data, slug: slug)
+    }
+
+    /// Persist only `<slug>_speakers.json` (never deleted on job completion, ignored by `ProtocolResumePolicy`).
+    func savePersistentSpeakers(_ data: PipelineQueue.SpeakerNamingData, slug: String) {
+        guard let recordingsDir else { return }
+        try? FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
+        let persistentPath = recordingsDir.appendingPathComponent("\(slug)\(Self.persistentSpeakersSuffix)")
+        if let json = try? Self.makeEncoder().encode(data) {
+            try? json.write(to: persistentPath, options: .atomic)
+            try? FileManager.default.restrictToOwner(persistentPath)
+        }
     }
 
     func load(slug: String) -> PipelineQueue.SpeakerNamingData? {

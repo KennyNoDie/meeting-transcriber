@@ -405,8 +405,16 @@ class SpeakerMatcher {
     }
 
     func loadDB() -> [StoredSpeaker] {
-        guard let data = try? Data(contentsOf: dbPath) else { return [] }
-        return (try? JSONDecoder().decode([StoredSpeaker].self, from: data)) ?? []
+        if let data = try? Data(contentsOf: dbPath),
+           let decoded = try? JSONDecoder().decode([StoredSpeaker].self, from: data) {
+            return decoded
+        }
+        if dbPath == AppPaths.speakersDB,
+           let legacyData = try? Data(contentsOf: AppPaths.legacySpeakersDB),
+           let decoded = try? JSONDecoder().decode([StoredSpeaker].self, from: legacyData) {
+            return decoded
+        }
+        return []
     }
 
     /// Names of all stored speakers, ordered for picker display: most recently
@@ -440,6 +448,10 @@ class SpeakerMatcher {
 
     func saveDB(_ speakers: [StoredSpeaker]) {
         do {
+            try? FileManager.default.createDirectory(
+                at: dbPath.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+            )
             let data = try JSONEncoder().encode(speakers)
             let tmp = dbPath.deletingLastPathComponent()
                 .appendingPathComponent("speakers.json.tmp")
@@ -449,6 +461,14 @@ class SpeakerMatcher {
             // persisted DB to owner-only. The temp-file rename does not carry a
             // chmod applied pre-rename, so set it on the final path.
             try FileManager.default.restrictToOwner(dbPath)
+            if dbPath == AppPaths.speakersDB, AppPaths.legacySpeakersDB != dbPath {
+                try? FileManager.default.createDirectory(
+                    at: AppPaths.legacySpeakersDB.deletingLastPathComponent(),
+                    withIntermediateDirectories: true,
+                )
+                try? data.write(to: AppPaths.legacySpeakersDB, options: .atomic)
+                try? FileManager.default.restrictToOwner(AppPaths.legacySpeakersDB)
+            }
         } catch {
             logger.error("Failed to save speaker DB: \(error.localizedDescription, privacy: .public)")
         }

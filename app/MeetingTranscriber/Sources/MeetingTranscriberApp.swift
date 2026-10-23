@@ -25,28 +25,14 @@ private struct AnimatedMenuBarIcon: View {
     let micSilentOverlay: Bool
     let appSilentOverlay: Bool
 
-    @State private var animationFrame = 0
-    // `.default` (not `.common`) so the timer never fires inside the status-bar
-    // menu's tracking loop — see MenuBarIcon.animationRunLoopMode for why.
-    private let iconTimer = Timer.publish(
-        every: 0.4, on: .main, in: MenuBarIcon.animationRunLoopMode,
-    ).autoconnect()
-
     var body: some View {
-        Image(nsImage: MenuBarIcon.image(
+        Image(nsImage: MenuBarIcon.statusBarImage(
             badge: badge,
-            animationFrame: animationFrame,
             permissionOverlay: permissionOverlay,
             recordOnlyOverlay: recordOnlyOverlay,
             micSilentOverlay: micSilentOverlay,
             appSilentOverlay: appSilentOverlay,
         ))
-        .onReceive(iconTimer) { _ in
-            let next = MenuBarIcon.nextFrame(animationFrame, badge: badge)
-            if next != animationFrame {
-                animationFrame = next
-            }
-        }
     }
 }
 
@@ -178,9 +164,6 @@ struct MeetingTranscriberApp: App {
             if !appState.isWatching {
                 appState.watching.toggleWatching(userInitiated: false)
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .showSpeakerNaming)) { _ in
-            bringWindowToFront(id: "speaker-naming")
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSettings)) { _ in
             bringWindowToFront(id: "settings")

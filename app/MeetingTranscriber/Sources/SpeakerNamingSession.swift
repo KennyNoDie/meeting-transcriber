@@ -291,6 +291,8 @@ final class SpeakerNamingSession {
         job: (jobID: UUID, title: String, slug: String, participants: [String]),
         diarizeProcess: any DiarizationProvider,
         isDualSource: Bool, outputDir: URL,
+        micLabel: String = "",
+        autoEnrollSpeakers: Bool = false,
     ) -> [String: String] {
         let (jobID, title, slug, participants) = job
         // No embeddings → no matching or dialog; keep the diarizer's own names.
@@ -308,6 +310,44 @@ final class SpeakerNamingSession {
                 mapping: autoNames,
                 speakingTimes: diarization.speakingTimes,
                 participants: participants,
+            )
+        }
+
+        if autoEnrollSpeakers {
+            var existingNames = Set(matcher.allSpeakerNames()).union(autoNames.values)
+
+            // 1. Auto-assign local mic primary speaker to `micLabel` (e.g., "Kenny")
+            if isDualSource, !micLabel.isEmpty {
+                let micLabels = embeddings.keys.filter { SpeakerKey(encoded: $0).track == .mic }
+                if let primaryMic = micLabels.max(by: { (diarization.speakingTimes[$0] ?? 0) < (diarization.speakingTimes[$1] ?? 0) }),
+                   autoNames[primaryMic] == primaryMic {
+                    autoNames[primaryMic] = micLabel
+                    existingNames.insert(micLabel)
+                }
+            }
+
+            // 2. Auto-enroll remaining unmatched speakers (>= 5s speaking time) into persistent voiceprint library
+            let unmatchedSorted = embeddings.keys
+                .filter { autoNames[$0] == $0 && (diarization.speakingTimes[$0] ?? 0) >= 5.0 }
+                .sorted { (diarization.speakingTimes[$0] ?? 0) > (diarization.speakingTimes[$1] ?? 0) }
+
+            var nextIndex = 1
+            for label in unmatchedSorted {
+                while existingNames.contains(String(format: "说话人_%02d", nextIndex)) {
+                    nextIndex += 1
+                }
+                let assigned = String(format: "说话人_%02d", nextIndex)
+                autoNames[label] = assigned
+                existingNames.insert(assigned)
+                nextIndex += 1
+            }
+
+            // 3. Persist matched and newly enrolled voiceprints into `speakers.json`
+            delegate?.updateSpeakerDB(
+                matcher: matcher,
+                mapping: autoNames,
+                embeddings: embeddings,
+                speakingTimes: diarization.speakingTimes,
             )
         }
 
@@ -332,6 +372,23 @@ final class SpeakerNamingSession {
             isDualSource: isDualSource,
         )
 
+        if autoEnrollSpeakers {
+            SpeakerNamingStore(outputDir: outputDir).savePersistentSpeakers(namingData, slug: slug)
+            delegate?.setNamingMetadata(
+                jobID: jobID, slug: slug, usedDiarizerMode: diarizeProcess.mode,
+                wroteSidecarsIn: outputDir,
+            )
+            delegate?.namingStageDidEnd()
+            stashedSuggestedAtDialog[jobID] = suggestedAtDialog
+            stashedTopCandidates[jobID] = topCandidates
+            recordRecognition(
+                jobID: jobID, title: title,
+                userMapping: nil, fallback: autoNames,
+                source: .headless,
+            )
+            return autoNames
+        }
+
         // Persist naming data and set slug + mode early.
         let saved = saveNamingData(namingData, slug: slug, in: outputDir)
         delegate?.setNamingMetadata(
@@ -347,15 +404,6 @@ final class SpeakerNamingSession {
         stashedTopCandidates[jobID] = topCandidates
 
         if delegate?.job(withID: jobID)?.autoSkipNaming == true {
-            // Headless blocking-transcribe: accept the auto-assigned names
-            // (exactly like a `.skipped` dialog result) so the job finishes on
-            // its own. Don't stash naming data: there is no interactive client
-            // to resolve it, and parking would wedge the job until the next
-            // launch's 24h stale-cleanup.
-            //
-            // Log it as a resolution like every other path, tagged `.headless`:
-            // the names still land in the transcript, so leaving no row would
-            // hide an auto-accept nobody reviewed.
             recordRecognition(
                 jobID: jobID, title: title,
                 userMapping: nil, fallback: autoNames,
@@ -363,10 +411,6 @@ final class SpeakerNamingSession {
             )
             return autoNames
         }
-        // Production/interactive: stash the naming data so the queue parks the
-        // job at `.speakerNamingPending` and pops the (re-openable) dialog. The
-        // pipeline continues with the auto-names; the dialog confirms later via
-        // `completeSpeakerNaming` without blocking.
         speakerNamingDataByJob[jobID] = namingData
         return autoNames
     }
