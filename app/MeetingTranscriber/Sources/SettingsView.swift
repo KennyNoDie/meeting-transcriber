@@ -3,6 +3,7 @@ import UserNotifications
 
 struct SettingsView: View {
     @Bindable var settings: AppSettings
+    var qwen3Engine: Qwen3ASREngine = Qwen3ASREngine()
     var whisperKitEngine: WhisperKitEngine
     var parakeetEngine: ParakeetEngine
     var updateChecker: UpdateChecker?
@@ -26,10 +27,13 @@ struct SettingsView: View {
     var pipelineBusy: Bool = false
     var onSpeakerMutate: (() -> Void)?
 
-    @State private var selection: SettingsTab = .general
+    @State private var selection: SettingsTab = .timeline
 
     var body: some View {
         splitView
+            .onReceive(NotificationCenter.default.publisher(for: .showTimeline)) { _ in
+                selection = .timeline
+            }
     }
 
     private var splitView: some View {
@@ -43,7 +47,7 @@ struct SettingsView: View {
         } detail: {
             detailView(for: selection)
         }
-        .navigationTitle("Settings")
+        .navigationTitle("设置与时间线")
         .frame(
             minWidth: 760,
             idealWidth: 860,
@@ -57,6 +61,9 @@ struct SettingsView: View {
     @ViewBuilder
     private func detailView(for tab: SettingsTab) -> some View {
         switch tab {
+        case .timeline:
+            TimelineSettingsView(settings: settings)
+
         case .general:
             GeneralSettingsView(
                 settings: settings,
@@ -69,6 +76,7 @@ struct SettingsView: View {
         case .transcription:
             TranscriptionSettingsView(
                 settings: settings,
+                qwen3Engine: qwen3Engine,
                 whisperKitEngine: whisperKitEngine,
                 parakeetEngine: parakeetEngine,
             )
@@ -97,7 +105,7 @@ struct SettingsView: View {
 }
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, audio, transcription, speakers, output, advanced, about
+    case timeline, general, audio, transcription, speakers, output, advanced, about
 
     var id: String {
         rawValue
@@ -105,18 +113,20 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .general: "General"
-        case .audio: "Audio"
-        case .transcription: "Transcription"
-        case .speakers: "Speakers"
-        case .output: "Output"
-        case .advanced: "Advanced"
-        case .about: "About"
+        case .timeline: "录音 × 时间线"
+        case .general: "常规监听"
+        case .audio: "音频与麦克风"
+        case .transcription: "语音识别 (ASR)"
+        case .speakers: "说话人识别"
+        case .output: "输出与提示词"
+        case .advanced: "权限与诊断"
+        case .about: "关于"
         }
     }
 
     var systemImage: String {
         switch self {
+        case .timeline: "clock.arrow.circlepath"
         case .general: "gear"
         case .audio: "mic"
         case .transcription: "waveform"

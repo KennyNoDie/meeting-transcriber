@@ -125,7 +125,9 @@ final class ChannelHealthController {
     /// without this channel the getters never run and `@Observable` registers no
     /// dependency on them for that render pass.
     var micSilentOverlay: Bool {
-        let silent = micSilentActive || recordingSilentActive
+        // Listening quietly while remote participants speak (`micSilentActive`) is normal in meetings;
+        // only tint the top half red on actual capture fault or when both channels are completely silent.
+        let silent = (micFault != nil) || recordingSilentActive
         return indicatorEnabled() && channels.mic && silent
     }
 

@@ -1,6 +1,8 @@
-# Meeting Transcriber
+# Meeting Transcriber (Chinese & Agent Timeline Edition)
 
-> **The local-first meeting transcriber for macOS.** Records Teams, Zoom, and Webex calls, transcribes them on-device with Whisper / Parakeet, separates speakers, and turns the result into a Markdown protocol using your own Claude CLI or any local LLM. **No cloud. No subscription. No audio ever leaves your Mac.**
+> 🇨🇳 **[中文增强版说明文档 (README_ZH.md)](README_ZH.md)** — 本分支在原仓库基础上新增：**全中文 UI 汉化**、**原生集成阿里 `Qwen/Qwen3-ASR-1.7B` (Apple Silicon MLX)**、**企业微信 (`wwmapp`)/微信/腾讯会议无感自动监听**、**「录音 × 时间线」可视化面板 (`⌘T`)**、**安静听会防误报红灯补丁**，以及借鉴 [auday-skill](https://github.com/666ghj/auday-skill) 的 **窄检索 CLI (`scripts/timeline_cli.py`) 与 `skills/meeting-transcriber-timeline` Agent Skill**。
+>
+> **The local-first meeting transcriber for macOS.** Records Teams, Zoom, Webex, WeCom, WeChat, and Tencent Meeting calls, transcribes them on-device with Qwen3-ASR 1.7B / Whisper / Parakeet, separates speakers, and turns the result into a daily timeline and Markdown protocol using your own local Agent or LLM. **No cloud. No subscription. No audio ever leaves your Mac.**
 
 <p align="center">
   <img src="docs/hero.gif" alt="Meeting Transcriber turning a Teams call into a Markdown protocol on-device" width="860">

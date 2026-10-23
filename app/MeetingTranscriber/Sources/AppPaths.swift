@@ -23,22 +23,39 @@ enum AppPaths {
     /// IPC directory: under `dataDir` for sandbox compatibility.
     static let ipcDir = dataDir.appendingPathComponent("ipc", isDirectory: true)
 
-    /// Recordings directory.
-    static let recordingsDir = dataDir.appendingPathComponent("recordings", isDirectory: true)
-
-    /// Protocols output directory (legacy, inside Application Support).
-    static let protocolsDir = dataDir.appendingPathComponent("protocols", isDirectory: true)
-
-    /// Default protocols output in Downloads: `~/Downloads/MeetingTranscriber/`
-    /// In sandbox, `FileManager.urls(for: .downloadsDirectory)` resolves to the container-granted path.
-    static let downloadsProtocolsDir: URL = {
-        guard let downloads = FileManager.default
-            .urls(for: .downloadsDirectory, in: .userDomainMask).first
-        else {
-            return protocolsDir
+    /// Configurable workspace root for Qwen3-ASR bridge scripts, `.venv`, and persistent `outputs/`.
+    /// Reads `MEETING_TRANSCRIBER_WORKSPACE` environment variable or `UserDefaults("workspaceRootDir")`,
+    /// falling back to `~/Documents/MeetingTranscriber`.
+    static var workspaceRootDir: URL {
+        if let envPath = ProcessInfo.processInfo.environment["MEETING_TRANSCRIBER_WORKSPACE"], !envPath.isEmpty {
+            return URL(fileURLWithPath: (envPath as NSString).expandingTildeInPath, isDirectory: true)
         }
-        return downloads.appendingPathComponent("MeetingTranscriber", isDirectory: true)
-    }()
+        if let custom = UserDefaults.standard.string(forKey: "workspaceRootDir"), !custom.isEmpty {
+            return URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/MeetingTranscriber", isDirectory: true)
+    }
+
+    /// Persistent output root: `<workspaceRootDir>/outputs/`
+    static var persistentOutputDir: URL {
+        workspaceRootDir.appendingPathComponent("outputs", isDirectory: true)
+    }
+
+    /// Recordings directory (stored directly inside `outputs/recordings` to avoid cache cleanup).
+    static var recordingsDir: URL {
+        persistentOutputDir.appendingPathComponent("recordings", isDirectory: true)
+    }
+
+    /// Protocols output directory.
+    static var protocolsDir: URL {
+        persistentOutputDir.appendingPathComponent("protocols", isDirectory: true)
+    }
+
+    /// Default output directory: `<workspaceRootDir>/outputs/`
+    static var downloadsProtocolsDir: URL {
+        persistentOutputDir
+    }
 
     /// Speaker voice profiles DB.
     static let speakersDB = dataDir.appendingPathComponent("speakers.json")

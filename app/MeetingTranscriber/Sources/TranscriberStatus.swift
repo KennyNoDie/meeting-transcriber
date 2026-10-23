@@ -31,16 +31,16 @@ enum TranscriberState: String, Codable {
 
     var label: String {
         switch self {
-        case .idle: "Idle"
-        case .watching: "Watching for Meetings..."
-        case .recording: "Recording"
-        case .transcribing: "Transcribing..."
-        case .generatingProtocol: "Generating Protocol..."
-        case .waitingForSpeakerCount: "Speaker Count"
-        case .waitingForSpeakerNames: "Name Speakers"
-        case .recordingDone: "Transcribing (Native)..."
-        case .protocolReady: "Protocol Ready"
-        case .error: "Error"
+        case .idle: "待机中 (Idle)"
+        case .watching: "后台静默监听会议中..."
+        case .recording: "正在录音..."
+        case .transcribing: "正在转录..."
+        case .generatingProtocol: "正在生成纪要..."
+        case .waitingForSpeakerCount: "等待确认说话人数"
+        case .waitingForSpeakerNames: "等待命名说话人"
+        case .recordingDone: "录音完成 · 本地转录中..."
+        case .protocolReady: "转录已就绪"
+        case .error: "错误"
         }
     }
 

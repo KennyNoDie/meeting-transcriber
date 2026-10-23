@@ -1,0 +1,9 @@
+# 后置确定性同音纠错规则示例（Deterministic Post-ASR Terminology Normalization）
+# 格式：标准词 => 常见误识词1 | 常见误识词2
+# 复制为 config/terminology_rules.txt 后按需增补
+
+Qwen3-ASR => 千问三ASR | 千问ASR
+Claude Code => 克劳德code | 克劳德扣的
+ABTest => A B 测试 | AB测试
+CTR => C T R | 点击率指标
+OKR => O K R

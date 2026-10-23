@@ -14,12 +14,15 @@ import SwiftUI
 // so disable the lint here rather than fight the formatter.
 enum TranscriptionEngineSetting: String, CaseIterable, Codable {
     // swiftlint:disable:next raw_value_for_camel_cased_codable_enum
+    case qwen3ASR
+    // swiftlint:disable:next raw_value_for_camel_cased_codable_enum
     case whisperKit
     case parakeet
 
     var label: String {
         switch self {
-        case .whisperKit: "WhisperKit (Whisper)"
+        case .qwen3ASR: "Qwen3-ASR 1.7B (阿里千问 · 本地 MLX)"
+        case .whisperKit: "WhisperKit (OpenAI Whisper)"
         case .parakeet: "Parakeet TDT v3 (NVIDIA)"
         }
     }
@@ -29,7 +32,7 @@ enum TranscriptionEngineSetting: String, CaseIterable, Codable {
     /// engines with stricter OS floors.
     var isAvailable: Bool {
         switch self {
-        case .whisperKit, .parakeet: true
+        case .qwen3ASR, .whisperKit, .parakeet: true
         }
     }
 
@@ -44,6 +47,7 @@ enum TranscriptionEngineSetting: String, CaseIterable, Codable {
     /// future non-streaming engine is forced to declare its support here.
     var supportsLiveTranscription: Bool {
         switch self {
+        case .qwen3ASR: false
         case .whisperKit, .parakeet: true
         }
     }
@@ -59,8 +63,8 @@ enum DiarizerMode: String, CaseIterable, Codable {
 
     var label: String {
         switch self {
-        case .offline: "Offline (Clustering)"
-        case .sortformer: "Sortformer (Overlap-aware)"
+        case .offline: "离线聚类 (Offline · 多人会议)"
+        case .sortformer: "Sortformer (重叠语音感知 · ≤4人)"
         }
     }
 
@@ -92,9 +96,9 @@ enum ProtocolProvider: String, CaseIterable {
             case .claudeCLI: "Claude CLI"
         #endif
 
-        case .openAICompatible: "OpenAI-Compatible API"
+        case .openAICompatible: "OpenAI 兼容接口 (本地/远端 API)"
 
-        case .none: "None (Transcript Only)"
+        case .none: "不启用 (仅保存原始转录，交由本地 Agent 汇总)"
         }
     }
 }
@@ -600,10 +604,10 @@ final class AppSettings {
         asymmetricSilenceWarningSeconds = max(30, min(300, defaults.object(forKey: "asymmetricSilenceWarningSeconds") as? Double ?? 90))
 
         transcriptionEngine = (defaults.string(forKey: "transcriptionEngine")
-            .flatMap(TranscriptionEngineSetting.init(rawValue:))) ?? .whisperKit
+            .flatMap(TranscriptionEngineSetting.init(rawValue:))) ?? .qwen3ASR
         whisperKitModel = defaults.object(forKey: "whisperKitModel") as? String
             ?? "openai_whisper-large-v3-v20240930_turbo"
-        whisperLanguage = defaults.object(forKey: "whisperLanguage") as? String ?? "de"
+        whisperLanguage = defaults.object(forKey: "whisperLanguage") as? String ?? "zh"
         parakeetLanguage = defaults.object(forKey: "parakeetLanguage") as? String ?? ""
         customVocabularyPath = defaults.string(forKey: "customVocabularyPath") ?? ""
         customVocabularyBookmark = defaults.data(forKey: "customVocabularyBookmark")

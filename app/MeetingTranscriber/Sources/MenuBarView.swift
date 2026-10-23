@@ -125,9 +125,9 @@ struct MenuBarView: View {
             onStartStop()
         } label: {
             if isWatching {
-                Label("Stop Watching", systemImage: "stop.fill")
+                Label("停止自动监听", systemImage: "stop.fill")
             } else {
-                Label("Start Watching", systemImage: "play.fill")
+                Label("启动自动监听", systemImage: "play.fill")
             }
         }
         .keyboardShortcut("s")
@@ -136,23 +136,23 @@ struct MenuBarView: View {
             Button {
                 onStopManualRecording()
             } label: {
-                Label("Stop Recording", systemImage: "stop.circle.fill")
+                Label("停止当前录音", systemImage: "stop.circle.fill")
             }
             .keyboardShortcut(".")
         } else if state != .recording {
             Button {
                 onRecordMicrophone()
             } label: {
-                Label("Record Microphone", systemImage: "mic.circle")
+                Label("仅录制麦克风 (速记)", systemImage: "mic.circle")
             }
             .keyboardShortcut("m")
             .disabled(!microphoneAvailability.allowsStart)
-            .help(microphoneAvailability.disabledReason ?? "Record the system microphone, with no app audio")
+            .help(microphoneAvailability.disabledReason ?? "仅录制当前麦克风输入，不录制应用声音")
 
             Button {
                 onRecordApp()
             } label: {
-                Label("Record App...", systemImage: "record.circle")
+                Label("指定应用双轨录音...", systemImage: "record.circle")
             }
             .keyboardShortcut("r")
         }
@@ -161,7 +161,7 @@ struct MenuBarView: View {
             Button {
                 onNameSpeakers()
             } label: {
-                Label("Name Speakers...", systemImage: "person.2.fill")
+                Label("确认说话人姓名...", systemImage: "person.2.fill")
             }
             .keyboardShortcut("n")
         }
@@ -169,7 +169,7 @@ struct MenuBarView: View {
         Button {
             onProcessFiles()
         } label: {
-            Label("Process Audio/Video Files...", systemImage: "doc.badge.plus")
+            Label("导入音视频文件转录...", systemImage: "doc.badge.plus")
         }
         .keyboardShortcut("p")
     }
@@ -177,7 +177,7 @@ struct MenuBarView: View {
     @ViewBuilder private var processingQueue: some View {
         if !pipelineQueue.jobs.isEmpty {
             Divider()
-            Label("Processing", systemImage: "gearshape.2.fill")
+            Label("处理队列", systemImage: "gearshape.2.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -188,11 +188,19 @@ struct MenuBarView: View {
     }
 
     @ViewBuilder private var protocolActions: some View {
+        Button {
+            onOpenSettings()
+            NotificationCenter.default.post(name: .showTimeline, object: nil)
+        } label: {
+            Label("打开录音 × 时间线...", systemImage: "clock.arrow.circlepath")
+        }
+        .keyboardShortcut("t")
+
         if let protocolPath = status?.protocolPath {
             Button {
                 onOpenLastProtocol()
             } label: {
-                Label("Open Last Protocol", systemImage: "doc.text")
+                Label("打开最新转录记录", systemImage: "doc.text")
             }
             .keyboardShortcut("o")
             .disabled(protocolPath.isEmpty)
@@ -201,7 +209,7 @@ struct MenuBarView: View {
         Button {
             onOpenProtocolsFolder()
         } label: {
-            Label("Open Protocols Folder", systemImage: "folder")
+            Label("打开输出文件夹", systemImage: "folder")
         }
     }
 
@@ -212,7 +220,7 @@ struct MenuBarView: View {
                 NSWorkspace.shared.open(update.dmgURL ?? update.htmlURL)
             } label: {
                 Label(
-                    "Update Available: \(update.tagName)",
+                    "发现新版本: \(update.tagName)",
                     systemImage: "arrow.down.circle.fill",
                 )
             }
@@ -223,7 +231,7 @@ struct MenuBarView: View {
         Button {
             onOpenSettings()
         } label: {
-            Label("Settings...", systemImage: "gear")
+            Label("设置与时间线...", systemImage: "gear")
         }
         .keyboardShortcut(",")
     }
@@ -232,7 +240,7 @@ struct MenuBarView: View {
         Button {
             onQuit()
         } label: {
-            Text("Quit")
+            Text("退出 MeetingTranscriber")
         }
         .keyboardShortcut("q")
     }
@@ -251,21 +259,21 @@ struct MenuBarView: View {
             }
             Spacer()
             if job.state == .done, let path = job.protocolPath ?? job.transcriptPath {
-                Button("Open") { onOpenProtocol(path) }
+                Button("打开") { onOpenProtocol(path) }
                     .font(.caption2)
             }
             if job.state == .speakerNamingPending {
-                Button("Name Speakers") { onNameSpeakers?() }
+                Button("命名说话人") { onNameSpeakers?() }
                     .font(.caption2)
             }
             if job.state == .waiting || job.state == .transcribing
                 || job.state == .diarizing || job.state == .generatingProtocol {
-                Button("Cancel") { pipelineQueue.cancelJob(id: job.id) }
+                Button("取消") { pipelineQueue.cancelJob(id: job.id) }
                     .font(.caption2)
             }
             retryButton(job, index: index)
             if job.state == .done || job.state == .error || job.state == .speakerNamingPending {
-                Button("Dismiss") { onDismissJob(job.id) }
+                Button("清除") { onDismissJob(job.id) }
                     .font(.caption2)
             }
         }
@@ -277,7 +285,7 @@ struct MenuBarView: View {
     @ViewBuilder
     private func retryButton(_ job: PipelineJob, index: Int) -> some View {
         if pipelineQueue.canRetryJob(id: job.id) {
-            Button("Retry") { pipelineQueue.retryJob(id: job.id) }
+            Button("重试") { pipelineQueue.retryJob(id: job.id) }
                 .font(.caption2)
                 .accessibilityIdentifier(A11yID.jobRetryButton(index))
         }

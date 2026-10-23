@@ -33,54 +33,50 @@ struct AdvancedSettingsView: View {
     var body: some View {
         // swiftlint:disable:next closure_body_length
         Form {
-            Section("Permissions") {
+            Section("系统权限状态") {
                 PermissionRow(
-                    label: "Screen Recording",
+                    label: "屏幕录制与系统音频 (Screen & System Audio)",
                     detail: Self.screenRecordingDetail,
                     granted: screenRecordingOK,
-                    help: "\(SystemSettingsPaths.screenRecording) → enable Meeting Transcriber",
+                    help: "\(SystemSettingsPaths.screenRecording) → 开启 Meeting Transcriber",
                     settingsURL: PrivacyPane.screenCapture.url,
                 )
                 PermissionRow(
-                    label: "Microphone",
-                    detail: micPermission == .authorized ? "Granted"
-                        : micPermission == .notDetermined ? "Will prompt on first recording"
-                        : "Denied — click to open Settings",
+                    label: "麦克风权限 (Microphone)",
+                    detail: micPermission == .authorized ? "已授权"
+                        : micPermission == .notDetermined ? "首次录音时自动弹窗申请"
+                        : "未授权 — 点击前往系统设置开启",
                     granted: micPermission == .authorized,
                     warning: micPermission == .notDetermined,
-                    help: "System Settings → Privacy & Security → Microphone → enable Meeting Transcriber",
+                    help: "系统设置 → 隐私与安全性 → 麦克风 → 开启 Meeting Transcriber",
                     settingsURL: PrivacyPane.microphone.url,
                 )
                 PermissionRow(
-                    label: "Accessibility",
-                    detail: "Optional — enables mute detection and meeting naming",
+                    label: "辅助功能 (Accessibility · 可选)",
+                    detail: "可选 — 用于静音状态检测与自动提取会议窗口标题",
                     granted: accessibilityOK,
                     optional: true,
-                    help: "System Settings → Privacy & Security → Accessibility → enable Meeting Transcriber",
+                    help: "系统设置 → 隐私与安全性 → 辅助功能 → 开启 Meeting Transcriber",
                     settingsURL: PrivacyPane.accessibility.url,
                 )
 
-                Button("Refresh") {
+                Button("刷新权限状态") {
                     refreshPermissions()
                 }
                 .font(.caption)
             }
 
             // swiftlint:disable:next closure_body_length
-            Section("Diagnostics") {
-                Toggle("Verbose Diagnostic Logging", isOn: $settings.verboseDiagnostics)
+            Section("诊断与本地自动化接口") {
+                Toggle("启用详细诊断日志 (Verbose Logging)", isOn: $settings.verboseDiagnostics)
                 Text(
-                    "Logs detailed diagnostics across recording, transcription,"
-                        + " diarization, and protocol generation. Used to debug"
-                        + " issues. Off by default — toggle on, reproduce the"
-                        + " problem, then click \"Export Diagnostics…\" below to"
-                        + " attach a redacted log file to a bug report.",
+                    "记录录音、ASR 转录、说话人分离的详细日志。默认关闭；排查故障时开启并点击下方导出。",
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
                 HStack {
-                    Button("Export Diagnostics…") { exportDiagnostics() }
+                    Button("导出脱敏诊断日志…") { exportDiagnostics() }
                         .disabled(isExportingDiagnostics)
                     if isExportingDiagnostics {
                         ProgressView()
@@ -88,37 +84,29 @@ struct AdvancedSettingsView: View {
                     }
                 }
                 if let file = lastExportFile {
-                    Text("Exported to: \(file)")
+                    Text("已导出至: \(file)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 if let err = lastExportError {
-                    Text("Export failed: \(err)")
+                    Text("导出失败: \(err)")
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
 
                 #if !APPSTORE
-                    Button("Open Diagnostic Logs Folder") {
+                    Button("打开日志文件夹") {
                         NSWorkspace.shared.activateFileViewerSelecting([PersistentDiagnosticLog.logDirectory])
                     }
                     Text(
-                        "Persistent logs are kept for 30 days at"
-                            + " ~/Library/Logs/MeetingTranscriber/. Useful when"
-                            + " you need to attach logs from a session that"
-                            + " happened earlier today (or yesterday).",
+                        "持久日志保留 30 天，位于 ~/Library/Logs/MeetingTranscriber/。",
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                    Toggle("Local Automation API", isOn: $settings.debugRPCEnabled)
+                    Toggle("启用本地自动化 RPC 接口 (mt-cli / Agent 协同)", isOn: $settings.debugRPCEnabled)
                     Text(
-                        "Exposes the local automation API + pipeline state on"
-                            + " 127.0.0.1:9876 (POST /v1/transcribe, /v1/jobs, and"
-                            + " /v1/watch to start/stop watching from a hotkey or"
-                            + " Stream Deck; also `mt-cli`). Localhost-only,"
-                            + " bearer-token auth. Off by default; enable for"
-                            + " headless automation or shell-driven inspection.",
+                        "在 127.0.0.1:9876 暴露本地自动化接口（支持 mt-cli 状态查询、启停监听与录音控制，仅本机 Bearer Token 鉴权）。",
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -21,13 +21,13 @@ struct RecognitionStatsView: View {
         }
 
         var label: String {
-            "Last \(rawValue) days"
+            "近 \(rawValue) 天"
         }
     }
 
     var body: some View {
-        Section("Recognition Stats") {
-            Picker("Window", selection: $windowDays) {
+        Section("声纹识别准确率统计") {
+            Picker("统计窗口", selection: $windowDays) {
                 ForEach(WindowChoice.allCases) { choice in
                     Text(choice.label).tag(choice)
                 }
@@ -38,7 +38,7 @@ struct RecognitionStatsView: View {
                 if aggregate.total > 0 {
                     statsBody(aggregate)
                 } else {
-                    Text("No data yet — confirm a meeting to start collecting.")
+                    Text("暂无数据 — 确认一次多人会议的说话人后将自动开始统计。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -47,11 +47,11 @@ struct RecognitionStatsView: View {
             }
 
             HStack {
-                Button("Open Log Folder") {
+                Button("打开统计日志目录") {
                     NSWorkspace.shared.activateFileViewerSelecting([RecognitionStatsLog.defaultPath])
                 }
                 Spacer()
-                Button("Reload") {
+                Button("刷新") {
                     Task { await reload() }
                 }
             }

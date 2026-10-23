@@ -52,9 +52,9 @@ struct OutputSettingsView: View {
         Form {
             // Output folder applies to record-only AND protocol mode, so this
             // section deliberately sits outside the .recordOnlyDisabled block.
-            Section("Output Folder") {
+            Section("输出目录 (录音与转录归档根路径)") {
                 HStack {
-                    Text("Output Folder")
+                    Text("当前输出根目录")
                     Spacer()
                     Text(outputDirDisplay)
                         .foregroundStyle(.secondary)
@@ -63,11 +63,11 @@ struct OutputSettingsView: View {
                 }
 
                 HStack {
-                    Button("Choose\u{2026}") {
+                    Button("更改目录…") {
                         chooseOutputFolder()
                     }
 
-                    Button("Reset") {
+                    Button("恢复默认") {
                         settings.clearCustomOutputDir()
                     }
                     .disabled(settings.customOutputDirBookmark == nil)
@@ -77,13 +77,13 @@ struct OutputSettingsView: View {
             }
             .accessibilityIdentifier(A11yID.outputFolderSection)
 
-            Section("Protocol Generation") {
-                Toggle("Include full transcript in protocol", isOn: $settings.includeFullTranscriptInProtocol)
+            Section("单次纪要与提示词 (日常推荐保持「不启用」，由本地 Agent 汇总每日时间线)") {
+                Toggle("在生成的纪要末尾附带完整原始逐字稿", isOn: $settings.includeFullTranscriptInProtocol)
                     .accessibilityIdentifier(A11yID.includeFullTranscriptToggle)
-                Toggle("Save raw transcript separately", isOn: $settings.saveRawTranscriptSeparately)
+                Toggle("始终单独保存原始带时间戳逐字稿 (.txt)", isOn: $settings.saveRawTranscriptSeparately)
                     .accessibilityIdentifier(A11yID.saveRawTranscriptToggle)
 
-                Picker("LLM Provider", selection: $settings.protocolProvider) {
+                Picker("单次总结提供方", selection: $settings.protocolProvider) {
                     ForEach(ProtocolProvider.allCases, id: \.self) { provider in
                         Text(provider.label).tag(provider)
                     }
@@ -91,7 +91,7 @@ struct OutputSettingsView: View {
 
                 providerConfigView
 
-                Picker("Protocol Language", selection: $settings.protocolLanguage) {
+                Picker("纪要输出语言", selection: $settings.protocolLanguage) {
                     ForEach(AppSettings.protocolLanguages, id: \.self) { lang in
                         Text(lang).tag(lang)
                     }
@@ -143,7 +143,7 @@ struct OutputSettingsView: View {
             openAIConfigView
 
         case .none:
-            Text("No LLM summarization will be generated. Raw transcripts are retained if no protocol is saved.")
+            Text("当前每次录音只做本地 Qwen3-ASR 逐字转录（无需每次写提示词）。所有带时间戳的 .txt 片段会归档到时间线中，晚间由本地 Agent 统一按每日提示词润色汇总。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -224,26 +224,26 @@ struct OutputSettingsView: View {
     private var promptControls: some View {
         // swiftlint:disable:next closure_body_length
         HStack {
-            Button("Edit Prompt") {
+            Button("编辑提示词模板") {
                 openCustomPrompt()
                 refreshCustomPromptState()
             }
 
-            Button("Import Prompt") {
+            Button("导入提示词") {
                 importCustomPrompt()
                 refreshCustomPromptState()
             }
 
-            Button("Reset to Default") {
+            Button("重置为内置默认") {
                 showResetPromptConfirmation = true
             }
             .disabled(!hasCustomPrompt)
             .confirmationDialog(
-                "Reset protocol prompt to the built-in default?",
+                "确认将提示词模板重置为内置默认？",
                 isPresented: $showResetPromptConfirmation,
                 titleVisibility: .visible,
             ) {
-                Button("Reset", role: .destructive) {
+                Button("重置", role: .destructive) {
                     try? FileManager.default.removeItem(at: AppPaths.customPromptFile)
                     refreshCustomPromptState()
                 }
@@ -252,11 +252,11 @@ struct OutputSettingsView: View {
             Spacer()
 
             if hasCustomPrompt {
-                Label("Custom prompt active", systemImage: "doc.text.fill")
+                Label("已启用自定义高保真提示词", systemImage: "doc.text.fill")
                     .foregroundStyle(.blue)
                     .font(.caption)
             } else {
-                Label("Using default prompt", systemImage: "doc.text")
+                Label("使用默认提示词", systemImage: "doc.text")
                     .foregroundStyle(.secondary)
                     .font(.caption)
             }

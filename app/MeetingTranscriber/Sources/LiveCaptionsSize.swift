@@ -45,9 +45,9 @@ enum LiveCaptionsSize: String, CaseIterable, Codable {
 
     var label: String {
         switch self {
-        case .small: "Small"
-        case .medium: "Medium"
-        case .large: "Large"
+        case .small: "小号"
+        case .medium: "中号"
+        case .large: "大号"
         }
     }
 }

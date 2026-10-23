@@ -8,6 +8,7 @@ extension Notification.Name {
     static let autoWatchStart = Notification.Name("autoWatchStart")
     static let showSpeakerNaming = Notification.Name("showSpeakerNaming")
     static let showSettings = Notification.Name("showSettings")
+    static let showTimeline = Notification.Name("showTimeline")
     static let closeSettings = Notification.Name("closeSettings")
 }
 
@@ -225,7 +226,7 @@ struct MeetingTranscriberApp: App {
     // MARK: - Windows
 
     private var speakerNamingWindow: some Scene {
-        Window("Name Speakers", id: "speaker-naming") {
+        Window("确认说话人", id: "speaker-naming") {
             speakerNamingContent
                 // Pin the naming window so it stays visible + on top while the
                 // user works in other apps instead of vanishing on focus loss
@@ -251,9 +252,10 @@ struct MeetingTranscriberApp: App {
     }
 
     private var settingsWindow: some Scene {
-        Window("Settings", id: "settings") {
+        Window("MeetingTranscriber · 设置与时间线", id: "settings") {
             SettingsView(
                 settings: appState.settings,
+                qwen3Engine: appState.engines.qwen3Engine,
                 whisperKitEngine: appState.engines.whisperKit,
                 parakeetEngine: appState.engines.parakeetEngine,
                 updateChecker: appState.updateChecker,
@@ -276,7 +278,7 @@ struct MeetingTranscriberApp: App {
     }
 
     private var recordAppWindow: some Scene {
-        Window("Record App", id: "record-app") {
+        Window("录制指定应用", id: "record-app") {
             AppPickerView(
                 appsProvider: SystemRunningAppsProvider(),
                 // The controller's wide predicate, not `appState.isManualRecording`.

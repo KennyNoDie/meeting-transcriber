@@ -7,22 +7,22 @@ struct AboutSettingsView: View {
 
     var body: some View {
         Form {
-            Section("About") {
-                LabeledContent("Version", value: Self.versionString)
+            Section("关于 MeetingTranscriber (定制中文 + Qwen3-ASR 1.7B 版)") {
+                LabeledContent("版本号", value: Self.versionString)
                     .textSelection(.enabled)
-                LabeledContent("Identifier", value: Bundle.main.bundleID)
+                LabeledContent("Bundle ID", value: Bundle.main.bundleID)
                     .textSelection(.enabled)
-                LabeledContent("Build Date", value: Self.buildDate)
+                LabeledContent("构建时间", value: Self.buildDate)
                     .textSelection(.enabled)
-                LabeledContent("ffmpeg") {
+                LabeledContent("ffmpeg 状态") {
                     Label(
-                        FFmpegHelper.isAvailable ? "Available" : "Not installed",
+                        FFmpegHelper.isAvailable ? "已安装" : "未安装",
                         systemImage: FFmpegHelper.isAvailable ? "checkmark.circle.fill" : "xmark.circle.fill",
                     )
                     .foregroundStyle(FFmpegHelper.isAvailable ? .green : .secondary)
                     .font(.caption)
                 }
-                Link("GitHub", destination: Self.githubURL)
+                Link("GitHub 开源仓库", destination: Self.githubURL)
             }
 
             if let updateChecker {

@@ -24,6 +24,7 @@ import Observation
 /// regardless of this type's annotation (same as `LiveTranscriptionCoordinator`).
 @MainActor
 final class EngineController {
+    let qwen3Engine: Qwen3ASREngine
     let whisperKit: WhisperKitEngine
     let parakeetEngine: ParakeetEngine
 
@@ -40,6 +41,10 @@ final class EngineController {
     // to re-solve that engine's own init constraints at this call site (the same
     // reason AppState uses factory helpers for its defaults).
 
+    private static func makeQwen3() -> Qwen3ASREngine {
+        Qwen3ASREngine()
+    }
+
     private static func makeWhisperKit() -> WhisperKitEngine {
         WhisperKitEngine()
     }
@@ -51,6 +56,7 @@ final class EngineController {
     init(settings: AppSettings, warmupQueue: ModelWarmupQueue = ModelWarmupQueue()) {
         self.settings = settings
         self.warmupQueue = warmupQueue
+        self.qwen3Engine = Self.makeQwen3()
         self.whisperKit = Self.makeWhisperKit()
         self.parakeetEngine = Self.makeParakeet()
 
@@ -64,6 +70,9 @@ final class EngineController {
     /// The active transcription engine based on the current settings.
     var activeTranscriptionEngine: any TranscribingEngine {
         switch settings.transcriptionEngine {
+        case .qwen3ASR:
+            qwen3Engine
+
         case .parakeet:
             parakeetEngine
 
@@ -93,6 +102,12 @@ final class EngineController {
     /// watchers (`applyModelVariant` self-guards the same way).
     func syncEngineSettings() {
         switch settings.transcriptionEngine {
+        case .qwen3ASR:
+            let nextLang = settings.whisperLanguageOrNil
+            if qwen3Engine.language != nextLang { qwen3Engine.language = nextLang }
+            let nextVocab = settings.customVocabularyPath
+            if qwen3Engine.customVocabularyPath != nextVocab { qwen3Engine.customVocabularyPath = nextVocab }
+
         case .whisperKit:
             whisperKit.applyModelVariant(settings.whisperKitModel)
             let next = settings.whisperLanguageOrNil

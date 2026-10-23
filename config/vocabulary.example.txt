@@ -1,0 +1,26 @@
+# 领域高频词表示例（Domain Vocabulary Bias for Qwen3-ASR & WhisperKit）
+# 复制为 config/vocabulary.txt 后按需补充你的团队/业务专有名词（一行一个）
+
+# 1. AI 与大模型工程
+Qwen3-ASR
+WhisperKit
+FluidAudio
+Apple Silicon
+MLX
+CoreAudio
+Claude Code
+Codex
+MCP
+Agent Skill
+
+# 2. 常见产研与数据指标
+DAU
+MAU
+CTR
+CVR
+ROI
+ABTest
+PRD
+OKR
+SLA
+P99

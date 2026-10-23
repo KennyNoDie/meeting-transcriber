@@ -57,27 +57,27 @@ struct SpeakersSettingsView: View {
                 .recordOnlyDisabled(settings.recordOnly)
 
             if !settings.noMic {
-                Section("Speaker Identity") {
+                Section("本人声音标识") {
                     HStack {
-                        Text("Mic Speaker Name")
+                        Text("麦克风说话人姓名")
                         Spacer()
-                        TextField("Me", text: $settings.micName)
+                        TextField("我 (本机麦克风)", text: $settings.micName)
                             .frame(width: 160)
                             .multilineTextAlignment(.trailing)
                             .accessibilityIdentifier(A11yID.micNameField)
                     }
-                    Text("Your name for dual-source mode. Leave empty to diarize mic track (multi-person room).")
+                    Text("双轨录制模式下，麦克风通道自动标记为该姓名；若留空则对麦克风通道也进行多人声纹分离。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .recordOnlyDisabled(settings.recordOnly)
             }
 
-            Section("Known Voices") {
-                Button("Manage\u{2026}") {
+            Section("已知声纹库 (Known Voices)") {
+                Button("管理声纹库…") {
                     knownVoicesSheet = KnownVoicesSheetItem(matcher: matcherFactory())
                 }
-                Text("Rename, delete, or merge entries in your speaker DB.")
+                Text("重命名、删除或合并声纹库中的常用参会人声纹。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -101,13 +101,13 @@ struct SpeakersSettingsView: View {
     // MARK: - Diarization Section
 
     private var diarizationSection: some View {
-        Section("Diarization") {
-            Toggle("Speaker Diarization", isOn: $settings.diarize)
+        Section("说话人分离 (Speaker Diarization)") {
+            Toggle("启用说话人分离 (区分不同发言人)", isOn: $settings.diarize)
             if settings.diarize {
                 diarizationModePicker
                 if settings.diarizerMode == .sortformer {
                     Label(
-                        "Sortformer supports up to \(DiarizerMode.sortformer.speakerCap) speakers per meeting. Switch to Offline mode for meetings with more participants.",
+                        "Sortformer 最多支持 \(DiarizerMode.sortformer.speakerCap) 位发言人；超过 4 人的会议请切换为离线聚类 (Offline)。",
                         systemImage: "info.circle",
                     )
                     .foregroundStyle(.secondary)
@@ -115,7 +115,7 @@ struct SpeakersSettingsView: View {
                 }
                 expectedSpeakersRow
                 Label(
-                    "Auto detects the count; a fixed value forces exactly that many speakers (and over-splits a smaller meeting).",
+                    "「自动」会自动检测发言人数；指定固定数字将强制切分为对应人数。",
                     systemImage: "info.circle",
                 )
                 .foregroundStyle(.secondary)
@@ -128,7 +128,7 @@ struct SpeakersSettingsView: View {
     }
 
     private var diarizationModePicker: some View {
-        Picker("Diarizer", selection: $settings.diarizerMode) {
+        Picker("分离算法", selection: $settings.diarizerMode) {
             ForEach(DiarizerMode.allCases, id: \.self) { mode in
                 Text(mode.label).tag(mode)
             }
@@ -143,9 +143,9 @@ struct SpeakersSettingsView: View {
 
     private var expectedSpeakersRow: some View {
         HStack {
-            Text("Expected Speakers")
+            Text("预期发言人数")
             Spacer()
-            Text(settings.numSpeakers == 0 ? "Auto" : "\(settings.numSpeakers)")
+            Text(settings.numSpeakers == 0 ? "自动" : "\(settings.numSpeakers)")
                 .frame(width: 40)
                 .multilineTextAlignment(.trailing)
             Stepper(

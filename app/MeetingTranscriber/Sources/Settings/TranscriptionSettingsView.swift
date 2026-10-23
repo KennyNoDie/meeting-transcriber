@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct TranscriptionSettingsView: View {
     @Bindable var settings: AppSettings
+    var qwen3Engine: Qwen3ASREngine = Qwen3ASREngine()
     var whisperKitEngine: WhisperKitEngine
     var parakeetEngine: ParakeetEngine
 
@@ -11,8 +12,13 @@ struct TranscriptionSettingsView: View {
     /// download is pending — defers the actual enable to the consent alert.
     @State private var pendingCaptionEnable = false
 
+    private static let qwen3Models: [(variant: String, label: String)] = [
+        ("Qwen/Qwen3-ASR-1.7B", "Qwen3-ASR-1.7B (旗舰 · 4.7GB FP16 · 推荐)"),
+        ("Qwen/Qwen3-ASR-0.6B", "Qwen3-ASR-0.6B (轻量 · 1.8GB FP16)"),
+    ]
+
     private static let whisperKitModels: [(variant: String, label: String)] = [
-        ("openai_whisper-large-v3-v20240930_turbo", "Large V3 Turbo (recommended)"),
+        ("openai_whisper-large-v3-v20240930_turbo", "Large V3 Turbo (推荐)"),
         ("openai_whisper-large-v3-v20240930", "Large V3"),
         ("openai_whisper-large-v2", "Large V2"),
         ("openai_whisper-small", "Small"),
@@ -36,8 +42,9 @@ struct TranscriptionSettingsView: View {
     /// some controls by their position in the section, so merging two of them
     /// into one property would move every control after it.
     private var transcriptionSection: some View {
-        Section("Transcription") {
+        Section("语音转录引擎 (ASR)") {
             enginePicker
+            qwen3Pickers
             whisperKitPickers
             parakeetLanguagePicker
             customVocabularyRow
@@ -51,7 +58,7 @@ struct TranscriptionSettingsView: View {
     }
 
     private var enginePicker: some View {
-        Picker("Engine", selection: $settings.transcriptionEngine) {
+        Picker("识别引擎", selection: $settings.transcriptionEngine) {
             ForEach(TranscriptionEngineSetting.availableCases, id: \.self) { engine in
                 Text(engine.label).tag(engine)
             }
@@ -59,15 +66,35 @@ struct TranscriptionSettingsView: View {
     }
 
     @ViewBuilder
+    private var qwen3Pickers: some View { // swiftlint:disable:this attributes
+        if settings.transcriptionEngine == .qwen3ASR {
+            Picker("Qwen3 模型规格", selection: Binding(
+                get: { qwen3Engine.modelVariant },
+                set: { qwen3Engine.modelVariant = $0 },
+            )) {
+                ForEach(Self.qwen3Models, id: \.variant) { model in
+                    Text(model.label).tag(model.variant)
+                }
+            }
+
+            Picker("识别语言", selection: $settings.whisperLanguage) {
+                ForEach(PickerLanguages.whisperKit, id: \.code) { lang in
+                    Text(lang.label).tag(lang.code)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var whisperKitPickers: some View { // swiftlint:disable:this attributes
         if settings.transcriptionEngine == .whisperKit {
-            Picker("Model", selection: $settings.whisperKitModel) {
+            Picker("Whisper 模型", selection: $settings.whisperKitModel) {
                 ForEach(Self.whisperKitModels, id: \.variant) { model in
                     Text(model.label).tag(model.variant)
                 }
             }
 
-            Picker("Language", selection: $settings.whisperLanguage) {
+            Picker("识别语言", selection: $settings.whisperLanguage) {
                 ForEach(PickerLanguages.whisperKit, id: \.code) { lang in
                     Text(lang.label).tag(lang.code)
                 }
@@ -78,7 +105,7 @@ struct TranscriptionSettingsView: View {
     @ViewBuilder
     private var parakeetLanguagePicker: some View { // swiftlint:disable:this attributes
         if settings.transcriptionEngine == .parakeet {
-            Picker("Language", selection: $settings.parakeetLanguage) {
+            Picker("识别语言", selection: $settings.parakeetLanguage) {
                 ForEach(PickerLanguages.parakeet, id: \.code) { lang in
                     Text(lang.label).tag(lang.code)
                 }
@@ -88,13 +115,13 @@ struct TranscriptionSettingsView: View {
 
     private var customVocabularyRow: some View {
         HStack {
-            TextField("Custom vocabulary file", text: Binding(
+            TextField("专属词表文件 (vocabulary.txt)", text: Binding(
                 get: { settings.customVocabularyPath },
                 set: { settings.setCustomVocabularyPath($0) },
             ))
             .textFieldStyle(.roundedBorder)
             .accessibilityIdentifier(A11yID.customVocabularyPathField)
-            Button("Choose\u{2026}") {
+            Button("选择文件…") {
                 let panel = NSOpenPanel()
                 panel.allowedContentTypes = [.plainText]
                 panel.allowsMultipleSelection = false
@@ -119,13 +146,10 @@ struct TranscriptionSettingsView: View {
     @ViewBuilder
     private var whisperKitVocabularyPromptControls: some View { // swiftlint:disable:this attributes
         if settings.transcriptionEngine == .whisperKit {
-            Toggle("Use custom vocabulary prompt (experimental)", isOn: $settings.whisperKitVocabularyPromptEnabled)
+            Toggle("启用自定义词表解码提示 (实验性)", isOn: $settings.whisperKitVocabularyPromptEnabled)
                 .accessibilityIdentifier(A11yID.whisperKitVocabularyPromptToggle)
                 .help(Self.whisperKitVocabularyPromptHelpText)
-            Text("Experimental: dense audio can omit whole sentences. See help for measured results; prefer Parakeet for vocabulary boosting.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("When enabled, WhisperKit uses a 32-token hint; earlier terms have priority.")
+            Text("注意：WhisperKit 词表提示在密集对话下可能吞句；中文与术语偏置建议直接使用 Qwen3-ASR 1.7B。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -133,15 +157,13 @@ struct TranscriptionSettingsView: View {
 
     private var terminologyRulesEditor: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Canonical terminology")
+            Text("术语纠错替换规则 (ASR 后自动正则归一化)")
             TextEditor(text: $settings.terminologyRulesText)
                 .font(.body.monospaced())
                 .frame(minHeight: 72)
                 .accessibilityIdentifier(A11yID.terminologyRulesEditor)
             Text(
-                "Applied to saved transcripts after ASR. One rule per line: "
-                    + "Canonical spelling => spoken variant | another variant. "
-                    + "Rules only replace whole words or phrases.",
+                "每行一条规则：标准写法 => 同音误识词1 | 误识词2（例如：TAPD => 踏平地 | 他批地）。",
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -154,13 +176,8 @@ struct TranscriptionSettingsView: View {
     /// Hoisted out of `body` into a named property so the section's nesting
     /// doesn't grow the `body` type-check past the 300 ms hard limit on CI.
     private var liveTranscriptionSection: some View {
-        Section("Live transcription (PoC)") {
-            // The toggle stays enabled even for engines without the
-            // re-transcribe hook, because the language-driven streaming
-            // backends route captions through an engine-independent session.
-            // Enabling it for a Nemotron language whose model isn't downloaded
-            // yet defers to a consent alert (the ~0.6 GB first-use download).
-            Toggle("Enable live transcription during recording", isOn: Binding(
+        Section("实时字幕浮窗 (可选)") {
+            Toggle("录音期间开启实时字幕流", isOn: Binding(
                 get: { settings.liveTranscriptionEnabled },
                 set: { enabled in
                     if enabled, needsCaptionModelConsent {
@@ -170,13 +187,12 @@ struct TranscriptionSettingsView: View {
                     }
                 },
             ))
-            .alert("Download caption model?", isPresented: $pendingCaptionEnable) {
-                Button("Cancel", role: .cancel) {}
-                Button("Enable") { settings.liveTranscriptionEnabled = true }
+            .alert("下载实时字幕模型？", isPresented: $pendingCaptionEnable) {
+                Button("取消", role: .cancel) {}
+                Button("启用") { settings.liveTranscriptionEnabled = true }
             } message: {
                 Text(
-                    "Live captions in this language use a roughly 0.6 GB on-device model, "
-                        + "downloaded once on first use.",
+                    "实时字幕在首次启用时需下载约 0.6 GB 本地流式模型。",
                 )
             }
 
@@ -197,22 +213,14 @@ struct TranscriptionSettingsView: View {
         .recordOnlyDisabled(settings.recordOnly)
     }
 
-    /// Nested under the master live-transcription toggle. Disabled when the
-    /// parent is off so the overlay cannot be flipped independently of the
-    /// pipeline. Visibility only: the coordinator still arms when the master
-    /// toggle is on.
     private var captionOverlayToggle: some View {
-        Toggle("Show caption overlay", isOn: $settings.liveCaptionsOverlayEnabled)
+        Toggle("显示屏幕底部穿透字幕条", isOn: $settings.liveCaptionsOverlayEnabled)
             .disabled(!settings.liveTranscriptionEnabled)
             .accessibilityIdentifier(A11yID.liveCaptionsOverlayToggle)
     }
 
-    /// Nested one level deeper than the overlay toggle: a hidden bar has no
-    /// size, so the picker is disabled whenever the toggle is off or disabled.
-    /// Segmented, since three named presets read better side by side than in
-    /// a menu.
     private var captionSizePicker: some View {
-        Picker("Caption size", selection: $settings.liveCaptionsSize) {
+        Picker("字幕字号", selection: $settings.liveCaptionsSize) {
             ForEach(LiveCaptionsSize.allCases, id: \.self) { size in
                 Text(size.label).tag(size)
             }
@@ -222,37 +230,26 @@ struct TranscriptionSettingsView: View {
         .accessibilityIdentifier(A11yID.liveCaptionsSizePicker)
     }
 
-    /// True when enabling captions would trigger the first-use Nemotron download:
-    /// the active language routes to Nemotron (set + non-English) and no model
-    /// variant is on disk yet.
     private var needsCaptionModelConsent: Bool {
         guard let language = settings.activeEngineLanguageOrNil, language != "en" else { return false }
         return !nemotronModelDownloaded
     }
 
-    /// Engine-specific terminology behaviour is deliberately explained next to
-    /// the shared file picker: the two engines consume the same file but provide
-    /// different levels of influence over recognition.
     static func vocabularyHelpText(for engine: TranscriptionEngineSetting) -> String {
         switch engine {
+        case .qwen3ASR:
+            "每行一个词条。Qwen3-ASR 1.7B 会将该词表直接作为 System Context 注入解码器，原生提升业务术语（如 PUBGM、WOW、TAPD、天穹）识别准确率。"
+
         case .parakeet:
-            "Text file with one term per line. Parakeet uses CTC rescoring for saved transcription. "
-                + "Live captions do not use CTC vocabulary rescoring."
+            "每行一个词条。Parakeet 使用 CTC 重打分提升词表命中率。"
 
         case .whisperKit:
-            "Text file with one term per line. Enable the experimental custom vocabulary prompt to pass a "
-                + "soft 32-token decoder hint to WhisperKit; it is not a guaranteed correction. "
-                + "It applies to live captions only when they use "
-                + "WhisperKit; language-specific live backends do not use it."
+            "每行一个词条。WhisperKit 仅提供 32-token 软提示。"
         }
     }
 
-    static let whisperKitVocabularyPromptHelpText = "Experimental. WhisperKit treats the vocabulary as a decoder hint, "
-        + "not a correction. In a dense four-speaker English evaluation, a 25-content-token prompt "
-        + "from this 32-token budget raised word error rate from 29% to 77% and deletions from 73 to 241. "
-        + "It can omit whole sentences. Results vary by audio; prefer Parakeet for vocabulary boosting."
+    static let whisperKitVocabularyPromptHelpText = "WhisperKit 将词表作为 32-token 软提示，密集音频下可能导致漏句；推荐使用 Qwen3-ASR 1.7B。"
 
-    /// Whether any Nemotron multilingual model variant is already on disk.
     private var nemotronModelDownloaded: Bool {
         guard let base = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask,
@@ -261,47 +258,17 @@ struct TranscriptionSettingsView: View {
         return FileManager.default.fileExists(atPath: dir.path)
     }
 
-    /// Describes which low-latency backend the current transcription language
-    /// selects. The backend follows the active engine's configured language (no
-    /// toggle): English → Parakeet EOU, any other set language → Nemotron
-    /// multilingual streaming, auto-detect → the standard re-transcribe engine.
     private var captionBackendFootnote: String {
-        switch settings.activeEngineLanguageOrNil {
-        case .none:
-            "Caption backend follows your transcription language. Auto-detect uses the "
-                + "standard re-transcribe engine; set a specific language for low-latency "
-                + "streaming captions."
-
-        case "en":
-            "Caption backend follows your transcription language. English uses the "
-                + "low-latency Parakeet streaming model."
-
-        default:
-            "Caption backend follows your transcription language. It uses the low-latency "
-                + "Nemotron multilingual streaming model (~0.6-0.7 GB, downloads on first use)."
-        }
+        "提示：您的诉求是「后台静默转录 + 每日时间线」，建议保持实时字幕关闭，零前台打扰、零额外内存占用。"
     }
 
     private var liveTranscriptionFootnote: String {
-        // Both current engines support the re-transcribe caption path, so
-        // captions are always available; this just explains the overlay. If a
-        // future engine returns `supportsLiveTranscription == false`, reintroduce
-        // a conditional "unsupported" message gated on that + `englishStreaming`.
-        "Live transcription runs during recording whether or not the overlay "
-            + "is visible. With \"Show caption overlay\" on, captions appear in a "
-            + "click-through bar at the bottom of the screen; turn it off to hide "
-            + "the bar without stopping transcription. Hold ⌥ (Option) "
-            + "to drag it; the position is remembered across sessions. "
-            + "Caption text is **not** logged by default — enable "
-            + "\"Verbose Diagnostic Logging\" in Advanced to see "
-            + "partials + finals in Console.app (subsystem "
-            + "com.meetingtranscriber, category LiveTranscription). "
-            + "Engine changes take effect on the next recording — "
-            + "switching mid-recording is not supported."
+        "按住 ⌥ (Option) 可拖动字幕条位置；切换识别引擎将在下一次录音生效。"
     }
 
     private var activeEngine: any TranscribingEngine {
         switch settings.transcriptionEngine {
+        case .qwen3ASR: qwen3Engine
         case .parakeet: parakeetEngine
         case .whisperKit: whisperKitEngine
         }
@@ -314,25 +281,30 @@ struct TranscriptionSettingsView: View {
         case .downloading:
             ProgressView(value: engine.downloadProgress)
                 .progressViewStyle(.linear)
-            Text("Downloading model... \(Int(engine.downloadProgress * 100))%")
+            Text("正在下载/检查模型... \(Int(engine.downloadProgress * 100))%")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
         case .loading:
             HStack {
                 ProgressView().controlSize(.small)
-                Text("Loading model...")
+                Text("正在加载模型到内存...")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
         case .loaded:
-            Label("Model ready", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .font(.caption)
+            Label(
+                settings.transcriptionEngine == .qwen3ASR
+                    ? "模型已就绪 · Qwen3-ASR-1.7B 本地 MLX 缓存已验证"
+                    : "模型已就绪 (Model ready)",
+                systemImage: "checkmark.circle.fill",
+            )
+            .foregroundStyle(.green)
+            .font(.caption)
 
         case .unloaded:
-            Button("Load Model") {
+            Button("加载并校验模型") {
                 if settings.transcriptionEngine == .whisperKit {
                     whisperKitEngine.modelVariant = settings.whisperKitModel
                 }

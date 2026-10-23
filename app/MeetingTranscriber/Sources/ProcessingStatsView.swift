@@ -22,13 +22,13 @@ struct ProcessingStatsView: View {
         }
 
         var label: String {
-            "Last \(rawValue) days"
+            "近 \(rawValue) 天"
         }
     }
 
     var body: some View {
-        Section("Processing Stats") {
-            Picker("Window", selection: $windowDays) {
+        Section("各阶段处理耗时统计") {
+            Picker("统计窗口", selection: $windowDays) {
                 ForEach(WindowChoice.allCases) { choice in
                     Text(choice.label).tag(choice)
                 }
@@ -37,7 +37,7 @@ struct ProcessingStatsView: View {
 
             if let aggregates {
                 if aggregates.isEmpty {
-                    Text("No data yet — process a meeting to start collecting.")
+                    Text("暂无耗时数据 — 完成一次转录后将自动统计平均耗时与实时率 (RTF)。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -52,11 +52,11 @@ struct ProcessingStatsView: View {
             }
 
             HStack {
-                Button("Open Log Folder") {
+                Button("打开统计日志目录") {
                     NSWorkspace.shared.activateFileViewerSelecting([StageTimingLog.defaultPath])
                 }
                 Spacer()
-                Button("Reload") {
+                Button("刷新") {
                     Task { await reload() }
                 }
             }

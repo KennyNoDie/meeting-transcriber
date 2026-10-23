@@ -7,17 +7,20 @@ struct AudioSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Microphone") {
-                Toggle("No Microphone (app audio only)", isOn: $settings.noMic)
+            Section("麦克风输入与热切换") {
+                Toggle("禁用麦克风 (仅录制应用内声音)", isOn: $settings.noMic)
 
                 if !settings.noMic {
-                    Picker("Microphone", selection: $settings.micDeviceUID) {
-                        Text("System Default").tag("")
+                    Picker("录音麦克风来源", selection: $settings.micDeviceUID) {
+                        Text("跟随系统默认 (自动热切换)").tag("")
                         ForEach(audioDevices, id: \.id) { device in
                             Text(device.name).tag(device.id)
                         }
                     }
                     .onAppear { refreshAudioDevices() }
+                    Text("提示：选择「跟随系统默认」时，录音中途切换无线麦/耳机/内置麦会自动无缝重连并保持时间轴对齐；若指定固定麦克风（如 MacBook Pro麦克风），则即使会议软件切走系统默认输入，转录仍固定使用该设备（拔出时自动回退系统默认）。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -44,16 +47,16 @@ private struct VoiceActivityDetectionSection: View {
     @Bindable var settings: AppSettings
 
     var body: some View {
-        Section("Voice Activity Detection") {
+        Section("语音活动检测 (VAD 静音过滤)") {
             HelpfulToggle(
-                title: "Voice Activity Detection (VAD)",
+                title: "启用 VAD 静音裁剪 (过滤长段空白噪音)",
                 help: SettingsHelp.vad,
                 isOn: $settings.vadEnabled,
             )
 
             if settings.vadEnabled {
                 HStack {
-                    Text("Threshold:")
+                    Text("触发阈值:")
                     Slider(value: $settings.vadThreshold, in: 0.3 ... 0.9, step: 0.05)
                     Text(String(format: "%.2f", settings.vadThreshold))
                         .monospacedDigit()
@@ -66,33 +69,24 @@ private struct VoiceActivityDetectionSection: View {
     }
 }
 
-/// Its own section rather than a row inside the VAD one: the VAD threshold
-/// slider sits directly under whatever shares that section, and a threshold
-/// row reading as if it tuned the echo removal is exactly the knob this
-/// feature refuses to have.
 private struct EchoSection: View {
     @Bindable var settings: AppSettings
 
     var body: some View {
-        Section("Echo") {
+        Section("扬声器回声消除") {
             HelpfulToggle(
-                title: "Remove echoed remote speech before transcribing",
+                title: "转录前消除麦克风串入的远端扬声器回声 (推荐)",
                 help: SettingsHelp.echoCancellation,
                 isOn: $settings.echoCancellationEnabled,
             )
             .accessibilityIdentifier(A11yID.echoCancellationToggle)
 
             HelpfulToggle(
-                title: "Remove echoed remote speech from the transcript",
+                title: "转录后去重回声文本",
                 help: SettingsHelp.echoDedup,
                 isOn: $settings.echoDedupEnabled,
             )
             .accessibilityIdentifier(A11yID.echoDedupToggle)
-            // Disabled rather than hidden while cancellation is on. The two
-            // remedies do not compose, so this one would not run; a switch
-            // that is on and does nothing is worse than one that is visibly
-            // unavailable, and hiding it would leave a stored setting nobody
-            // can see or change.
             .disabled(settings.echoCancellationEnabled)
         }
         .recordOnlyDisabled(settings.recordOnly)
@@ -103,38 +97,31 @@ private struct PerChannelIndicatorSection: View {
     @Bindable var settings: AppSettings
 
     var body: some View {
-        Section("Per-Channel Indicator") {
+        Section("声道健康监控") {
             HelpfulToggle(
-                title: "Detect Silent Capture Channel",
+                title: "检测静音采集通道并在状态栏告警",
                 help: SettingsHelp.silentCaptureChannel,
                 isOn: $settings.perChannelIndicatorEnabled,
             )
 
-            // Next to the indicator because it acts on the same failure the
-            // indicator shows: an app channel delivering only zeros.
             HelpfulToggle(
-                title: "Rebuild a Silent App-Audio Capture",
+                title: "应用音频通道无声时自动重建采集流",
                 help: SettingsHelp.silentTrackWatchdog,
                 isOn: $settings.silentTrackWatchdogEnabled,
             )
             .accessibilityIdentifier(A11yID.silentTrackWatchdogToggle)
 
-            // Shown whether or not the toggle above is on. The toggle decides
-            // whether the menu bar turns red; this number decides how long a
-            // channel must be failing before you are told about it, and that
-            // reporting happens either way. Hiding it with the toggle left a
-            // setting that still applied and could no longer be seen or changed.
             HStack {
-                Text("Warn after:")
+                Text("单边静音告警时长:")
                 HelpBadge(text: SettingsHelp.asymmetricSilenceWarning)
                 Slider(
                     value: $settings.asymmetricSilenceWarningSeconds,
                     in: 30 ... 300,
                     step: 10,
                 )
-                Text("\(Int(settings.asymmetricSilenceWarningSeconds))s")
+                Text("\(Int(settings.asymmetricSilenceWarningSeconds))秒")
                     .monospacedDigit()
-                    .frame(width: 40)
+                    .frame(width: 45)
             }
         }
         .accessibilityIdentifier(A11yID.channelIndicatorSection)

@@ -27,30 +27,29 @@ struct GeneralSettingsView: View {
     var body: some View {
         // swiftlint:disable:next closure_body_length
         Form {
-            Section("Mode") {
-                Toggle("Record-only mode", isOn: $settings.recordOnly)
+            Section("运行模式") {
+                Toggle("仅录音模式 (不自动转录)", isOn: $settings.recordOnly)
                     .accessibilityIdentifier(A11yID.recordOnlyToggle)
                 if settings.recordOnly {
                     recordOnlyBanner
                 }
             }
 
-            Section("Apps to Watch") {
+            Section("自动静默监听的应用") {
                 Toggle("Microsoft Teams", isOn: $settings.watchTeams)
                 Toggle("Zoom", isOn: $settings.watchZoom)
                 Toggle("Webex", isOn: $settings.watchWebex)
-                Toggle("WeChat", isOn: $settings.watchWeChat)
-                Toggle("Tencent Meeting", isOn: $settings.watchTencentMeeting)
+                Toggle("微信 (WeChat)", isOn: $settings.watchWeChat)
+                Toggle("腾讯会议 (Tencent Meeting)", isOn: $settings.watchTencentMeeting)
                 Toggle("FaceTime", isOn: $settings.watchFaceTime)
                 Toggle("WhatsApp", isOn: $settings.watchWhatsApp)
                 customApps
-                Toggle("Browser Web Meetings", isOn: $settings.watchBrowserMeetings)
+                Toggle("浏览器网页会议 (WebRTC)", isOn: $settings.watchBrowserMeetings)
                     .accessibilityIdentifier(A11yID.watchBrowserToggle)
                 Text(
                     """
-                    Detects web meetings (Google Meet, Whereby, web Zoom/Teams) by the WebRTC \
-                    signal, so any browser works. Other apps that place calls can trigger it too; \
-                    it always asks before recording, and "Never for this app" stops one for good.
+                    通过 WebRTC 信号检测网页会议（Google Meet、飞书/企微网页版等）。\
+                    触发前会弹窗询问，可选择「对该应用永不录制」。
                     """,
                 )
                 .font(.caption)
@@ -59,27 +58,27 @@ struct GeneralSettingsView: View {
                 consentDenyList
             }
 
-            Section("Detection") {
+            Section("监听检测灵敏度") {
                 HStack {
-                    Text("Poll Interval")
+                    Text("轮询间隔")
                     Spacer()
                     TextField("", value: $settings.pollInterval, format: .number)
                         .frame(width: 60)
                         .multilineTextAlignment(.trailing)
                     Stepper("", value: $settings.pollInterval, in: 1 ... 30, step: 0.5)
                         .labelsHidden()
-                    Text("seconds").foregroundStyle(.secondary)
+                    Text("秒").foregroundStyle(.secondary)
                 }
 
                 HStack {
-                    Text("Grace Period")
+                    Text("会议结束缓冲期")
                     Spacer()
                     TextField("", value: $settings.endGrace, format: .number)
                         .frame(width: 60)
                         .multilineTextAlignment(.trailing)
                     Stepper("", value: $settings.endGrace, in: 1 ... 120, step: 1)
                         .labelsHidden()
-                    Text("seconds").foregroundStyle(.secondary)
+                    Text("秒").foregroundStyle(.secondary)
                 }
             }
         }
@@ -94,15 +93,15 @@ struct GeneralSettingsView: View {
                     .frame(width: 16, height: 16)
                 Text(MicInputDetector.appDisplayName(bundleID: bundleID))
                 Spacer()
-                Button("Remove") {
+                Button("移除") {
                     settings.watchCustomApps.removeAll { $0 == bundleID }
                 }
                 .accessibilityIdentifier(A11yID.watchCustomAppRemove(index))
             }
         }
         VStack(alignment: .leading, spacing: 4) {
-            Button("Add App…", action: addCustomApps)
-            Text("Recording starts when an added app keeps the microphone busy for a few seconds.")
+            Button("添加自定义应用（如企业微信）…", action: addCustomApps)
+            Text("当列表中的应用持续占用麦克风数秒后，将自动静默启动双轨录音。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ForEach(addAppRefusals, id: \.self) { refusal in

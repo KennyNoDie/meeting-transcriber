@@ -107,9 +107,17 @@ extension AppSettings {
 
     private func resolveCustomOutputDir(isStale: inout Bool) -> URL? {
         guard let data = customOutputDirBookmark else { return nil }
-        return try? URL(
+        if let url = try? URL(
             resolvingBookmarkData: data,
             options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale,
+        ) {
+            return url
+        }
+        return try? URL(
+            resolvingBookmarkData: data,
+            options: [],
             relativeTo: nil,
             bookmarkDataIsStale: &isStale,
         )

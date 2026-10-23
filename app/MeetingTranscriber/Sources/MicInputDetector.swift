@@ -61,7 +61,8 @@ class MicInputDetector: MeetingDetecting {
         // so it may never match a main app process.
         MicPattern(
             appName: "Tencent Meeting",
-            bundleIDs: ["com.tencent.meeting", "com.tencent.tencentmeeting", "com.tencent.wemeet"],
+            bundleIDs: ["com.tencent.meeting", "com.tencent.tencentmeeting", "com.tencent.wemeet", "com.tencent.wwmapp", "com.tencent.WeWorkMac"],
+            matchesHelpers: true,
         ),
         // Measured on macOS 26.5.2 during a native FaceTime audio call: the
         // owner is `com.apple.avconferenced`, and `com.apple.FaceTime` never

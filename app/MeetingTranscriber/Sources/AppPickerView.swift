@@ -73,13 +73,13 @@ struct AppPickerView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("Record App")
+                Text("选择要双轨录制的应用")
                     .font(.headline)
                 Spacer()
                 Button {
                     apps = appsProvider.runningApps()
                 } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    Label("刷新", systemImage: "arrow.clockwise")
                         .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.borderless)
@@ -113,7 +113,7 @@ struct AppPickerView: View {
 
             // Title + actions
             VStack(spacing: 12) {
-                TextField("Meeting title (optional)", text: $meetingTitle)
+                TextField("会议/录音标题 (可选)", text: $meetingTitle)
                     .textFieldStyle(.roundedBorder)
 
                 if let explanation = startState.explanation {
@@ -123,14 +123,14 @@ struct AppPickerView: View {
                 }
 
                 HStack {
-                    Button("Cancel") {
+                    Button("取消") {
                         onCancel()
                     }
                     .keyboardShortcut(.cancelAction)
 
                     Spacer()
 
-                    Button("Start Recording") {
+                    Button("开始录音") {
                         guard let app = selectedApp else { return }
                         let title = meetingTitle.isEmpty ? app.name : meetingTitle
                         onStartRecording(app.id, app.name, title)
