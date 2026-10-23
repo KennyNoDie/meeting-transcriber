@@ -366,7 +366,10 @@ class WatchLoop {
             next.detail = "Recording: \(title)"
         }
 
-        let source = RecordingSource.forApp(pid: meeting.windowPID, noMic: noMic)
+        let isVoiceDictation = meeting.pattern.appName == MicInputDetector.voiceDictationAppName
+        let source = isVoiceDictation
+            ? RecordingSource.micOnly
+            : RecordingSource.forApp(pid: meeting.windowPID, noMic: noMic)
         let recorder = await recorderFactory()
         try recorder.start(
             source: source,
@@ -418,9 +421,12 @@ class WatchLoop {
     func waitForMeetingEnd(_ meeting: DetectedMeeting) async throws {
         var graceStart: Date?
         let startTime = nowProvider()
+        let effectiveGrace = meeting.pattern.appName == MicInputDetector.voiceDictationAppName
+            ? min(endGracePeriod, 5.0)
+            : endGracePeriod
         let config = WatchLoopEndConfig(
             maxDuration: maxDuration,
-            endGracePeriod: endGracePeriod,
+            endGracePeriod: effectiveGrace,
         )
 
         while !Task.isCancelled {

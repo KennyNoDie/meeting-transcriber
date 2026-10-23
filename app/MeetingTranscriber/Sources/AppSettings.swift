@@ -186,7 +186,7 @@ final class AppSettings {
 
     var pollInterval: Double {
         didSet {
-            if pollInterval < 1.0 { pollInterval = 1.0 }
+            if pollInterval < 0.5 { pollInterval = 0.5 }
             defaults.set(pollInterval, forKey: "pollInterval")
         }
     }
@@ -589,7 +589,7 @@ final class AppSettings {
         watchCustomApps = defaults.stringArray(forKey: "watchCustomApps") ?? []
         autoWatch = defaults.object(forKey: "autoWatch") as? Bool ?? false
 
-        pollInterval = defaults.object(forKey: "pollInterval") as? Double ?? 3.0
+        pollInterval = defaults.object(forKey: "pollInterval") as? Double ?? 1.0
         endGrace = defaults.object(forKey: "endGrace") as? Double ?? 15.0
         noMic = defaults.object(forKey: "noMic") as? Bool ?? false
         recordOnly = defaults.object(forKey: "recordOnly") as? Bool ?? false

@@ -39,6 +39,9 @@ enum AppLauncher {
         // never enters this function, so no test process writes a marker the
         // next real launch would read as a crash.
         previousExit = LivenessMarker.arm()
+        if case let .stillRunning(pid) = previousExit, pid != getpid() {
+            exit(0)
+        }
         MeetingTranscriberApp.main()
     }
 }

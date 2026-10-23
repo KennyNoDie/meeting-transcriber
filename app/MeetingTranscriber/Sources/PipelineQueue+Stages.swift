@@ -205,15 +205,15 @@ extension PipelineQueue {
             // with a protocol generated from one sentence.
             let body = transcription.cachedSegments?.transcriptText(note: nil) ?? transcription.transcript
             guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                // Compute input RMS only on the failure path — loading the whole
-                // mix file is expensive (~MB-per-minute) and we only need it when
-                // diagnosing why transcription produced nothing. Paired imports
-                // without a real mix file report NaN (RMS unavailable).
                 let inputRMS = ctx.mixPath.flatMap { AudioMixer.rmsDecibels(forFileAt: $0) } ?? .nan
-                logger.warning(
-                    "[\(ctx.shortID, privacy: .public)] transcription_empty inputRMSdBFS=\(inputRMS, privacy: .public). Likely silent input or ASR misconfiguration — check microphone level and engine settings.",
+                logger.info(
+                    "[\(ctx.shortID, privacy: .public)] transcription_empty inputRMSdBFS=\(inputRMS, privacy: .public) — skipping silent recording without error.",
                 )
-                updateJobState(id: ctx.jobID, to: .error, error: "Empty transcript")
+                for path in [ctx.mixPath, ctx.appPath, ctx.micPath].compactMap(\.self) {
+                    try? FileManager.default.removeItem(at: path)
+                }
+                jobs.removeAll { $0.id == ctx.jobID }
+                saveSnapshot()
                 isProcessing = false
                 triggerProcessing()
                 return

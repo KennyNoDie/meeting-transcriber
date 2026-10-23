@@ -157,15 +157,6 @@ struct MenuBarView: View {
             .keyboardShortcut("r")
         }
 
-        if let onNameSpeakers {
-            Button {
-                onNameSpeakers()
-            } label: {
-                Label("确认说话人姓名...", systemImage: "person.2.fill")
-            }
-            .keyboardShortcut("n")
-        }
-
         Button {
             onProcessFiles()
         } label: {

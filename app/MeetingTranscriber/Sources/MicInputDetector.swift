@@ -36,6 +36,9 @@ class MicInputDetector: MeetingDetecting {
         /// a helper bundle such as `com.example.callapp.helper`.
         var matchesHelpers = false
         var usesBuiltInMeetingPattern = true
+        /// Confirm on the first poll (`hits >= 1`) for short-lived voice dictation
+        /// input methods (e.g. Doubao IME / WeType voice-to-text with DJI Mic).
+        var immediateConfirmation = false
 
         func matches(bundleID: String) -> Bool {
             bundleIDs.contains { $0 == bundleID || (matchesHelpers && bundleID.hasPrefix($0 + ".")) }
@@ -48,6 +51,20 @@ class MicInputDetector: MeetingDetecting {
         }
     }
 
+    static let voiceDictationAppName = "语音输入速记"
+
+    static let voiceDictationPattern = MicPattern(
+        appName: voiceDictationAppName,
+        bundleIDs: [
+            "com.bytedance.inputmethod.doubaoime",
+            "com.tencent.inputmethod.wetype",
+            "com.apple.SpeechRecognitionCore.speechrecognitiond",
+        ],
+        matchesHelpers: true,
+        usesBuiltInMeetingPattern: false,
+        immediateConfirmation: true,
+    )
+
     static let defaultPatterns: [MicPattern] = [
         // WeChat calls run in the main app process. (Its sandboxed helpers
         // `.IPCHelper`, `.MiniProgram` and `.WeChatMacShare` are deliberately
@@ -56,12 +73,12 @@ class MicInputDetector: MeetingDetecting {
         // Two separate builds: `com.tencent.meeting` is 腾讯会议, and the
         // international VooV Meeting build is `com.tencent.tencentmeeting`
         // (both confirmed from the Homebrew casks' quit/zap identifiers).
-        // `com.tencent.wemeet` is kept as unverified insurance: the only
-        // wemeet-namespaced artifact found is a `.FileDelta` helper container,
-        // so it may never match a main app process.
+        // `com.tencent.wwmapp` is the dedicated WeCom meeting client (whereas
+        // `com.tencent.WeWorkMac` is the main chat app and is excluded so background
+        // audio probes do not trigger false meeting recordings).
         MicPattern(
             appName: "Tencent Meeting",
-            bundleIDs: ["com.tencent.meeting", "com.tencent.tencentmeeting", "com.tencent.wemeet", "com.tencent.wwmapp", "com.tencent.WeWorkMac"],
+            bundleIDs: ["com.tencent.meeting", "com.tencent.tencentmeeting", "com.tencent.wemeet", "com.tencent.wwmapp"],
             matchesHelpers: true,
         ),
         // Measured on macOS 26.5.2 during a native FaceTime audio call: the
@@ -78,13 +95,17 @@ class MicInputDetector: MeetingDetecting {
         // belongs to the browser detection channel.
         MicPattern(appName: "FaceTime", bundleIDs: ["com.apple.FaceTime", "com.apple.avconferenced"]),
         MicPattern(appName: "WhatsApp", bundleIDs: ["net.whatsapp.WhatsApp"]),
+        voiceDictationPattern,
     ]
 
     /// The `defaultPatterns` subset selected by the user's "Apps to Watch"
     /// toggles — same contract as `PowerAssertionDetector.patterns(watching:)`.
     static func patterns(watching watchedAppNames: [String], customBundleIDs: [String] = []) -> [MicPattern] {
         let watched = Set(watchedAppNames)
-        return defaultPatterns.filter { watched.contains($0.appName) } + customBundleIDs.map(customPattern(bundleID:))
+        let selected = defaultPatterns.filter {
+            watched.contains($0.appName) || $0.appName == voiceDictationAppName
+        }
+        return selected + customBundleIDs.map(customPattern(bundleID:))
     }
 
     static func customPattern(bundleID: String) -> MicPattern {
@@ -164,10 +185,14 @@ class MicInputDetector: MeetingDetecting {
         }
 
         for (appName, hits) in consecutiveHits {
-            if hits >= confirmationCount, let pid = firstMatch[appName],
-               let meetingPattern = patterns.first(where: { $0.meetingPattern.appName == appName })?.meetingPattern {
-                let title = matchers[appName]?.selectWindowTitle(from: windowListProvider())
-                    ?? PowerAssertionDetector.placeholderTitle(appName: appName)
+            guard let pattern = patterns.first(where: { $0.meetingPattern.appName == appName }) else { continue }
+            let requiredHits = pattern.immediateConfirmation ? 1 : confirmationCount
+            if hits >= requiredHits, let pid = firstMatch[appName] {
+                let meetingPattern = pattern.meetingPattern
+                let title = pattern.immediateConfirmation
+                    ? appName
+                    : (matchers[appName]?.selectWindowTitle(from: windowListProvider())
+                        ?? PowerAssertionDetector.placeholderTitle(appName: appName))
                 return DetectedMeeting(
                     pattern: meetingPattern,
                     windowTitle: title,
